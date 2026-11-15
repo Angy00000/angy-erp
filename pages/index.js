@@ -12,7 +12,7 @@ const CHIPS = ['📦 Stock par lots', '⚙️ Ordres de fabrication', '💰 Coû
 export default function Auth() {
   const router = useRouter();
   const [mode, setMode] = useState('login');
-  const [d, setD] = useState({ demo: true });
+  const [d, setD] = useState({ demo: false });
   const [err, setErr] = useState(null);
   const [busy, setBusy] = useState(false);
   const [slide, setSlide] = useState(0);
