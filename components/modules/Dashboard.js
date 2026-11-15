@@ -1,13 +1,14 @@
 import { report, money, num, date, daysUntil } from '../../lib/client';
 import { useData, Stat, Bars, HBars, Badge } from '../ui';
 
-export default function Dashboard({ go }) {
+export default function Dashboard({ go, user, company, can }) {
   const { data: d, loading } = useData(() => report('dashboard'), []);
   if (loading && !d) return <div className="spinner">Chargement du tableau de bord…</div>;
   if (!d) return null;
   const cashTotal = (d.cash || []).reduce((s, a) => s + a.balance, 0);
   return (
     <div>
+      <Hero user={user} company={company} go={go} can={can} />
       {d.setup && <Setup s={d.setup} go={go} />}
       <div className="grid g4">
         {d.sales && <Stat accent k="Ventes du jour" v={money(d.sales.today)} s={`${d.sales.today_count} facture(s)`} />}
@@ -93,6 +94,25 @@ function Setup({ s, go }) {
             {!ok && <button className="btn sm" onClick={() => go(mod)}>Ouvrir</button>}
           </div>
         ))}
+      </div>
+    </div>
+  );
+}
+
+function Hero({ user, company, go, can }) {
+  const h = new Date().getHours();
+  const hello = h < 12 ? 'Bonjour' : h < 18 ? 'Bon après-midi' : 'Bonsoir';
+  const first = (user?.name || '').split(' ')[0];
+  const actions = [['ventes', 'Nouvelle vente', true], ['production', 'Production'], ['stock', 'Stock'], ['rapports', 'Rapports']].filter(([m]) => !can || can(m));
+  return (
+    <div className="hero" style={{ backgroundImage: 'url(/img/usine-2.webp)' }}>
+      <div className="hero-in">
+        <div>
+          <div className="hk">{hello}{first ? `, ${first}` : ''}</div>
+          <h2>{company?.name || 'Votre entreprise'}</h2>
+          <p>{company?.sector || 'Production, stock, ventes et qualité — tout au même endroit.'}</p>
+        </div>
+        <div className="row">{actions.map(([m, l, primary]) => <button key={m} className={'btn' + (primary ? ' accent' : '')} onClick={() => go(m)}>{l}</button>)}</div>
       </div>
     </div>
   );

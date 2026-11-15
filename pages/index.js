@@ -2,12 +2,16 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/router';
 import { api } from '../lib/client';
 
+const SLIDES = ['/img/usine-1.webp', '/img/usine-2.webp', '/img/erp.webp'];
+
 export default function Auth() {
   const router = useRouter();
   const [mode, setMode] = useState('login');
   const [d, setD] = useState({ demo: true });
   const [err, setErr] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [slide, setSlide] = useState(0);
+  useEffect(() => { const t = setInterval(() => setSlide((x) => (x + 1) % SLIDES.length), 6000); return () => clearInterval(t); }, []);
   useEffect(() => { api('auth/me').then(() => router.replace('/app')).catch(() => {}); }, [router]);
   const set = (k) => (e) => setD({ ...d, [k]: e.target.type === 'checkbox' ? e.target.checked : e.target.value });
   const submit = async (e) => {
@@ -21,6 +25,8 @@ export default function Auth() {
   return (
     <div className="auth">
       <div className="auth-art">
+        {SLIDES.map((src, i) => <div key={src} className={'auth-bg' + (i === slide ? ' on' : '')} style={{ backgroundImage: `url(${src})` }} />)}
+        <div className="auth-dots">{SLIDES.map((_, i) => <button key={i} aria-label={`Image ${i + 1}`} className={i === slide ? 'on' : ''} onClick={() => setSlide(i)} />)}</div>
         <div className="logo"><div className="logo-mark">A</div>ANGY ERP</div>
         <div>
           <h1>Pilotez toute votre entreprise de production, du champ au client.</h1>
