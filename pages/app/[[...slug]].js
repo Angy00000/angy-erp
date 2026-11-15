@@ -50,7 +50,7 @@ export default function AppShell() {
     <div className="shell">
       <aside className={'side' + (open ? ' open' : '')}>
         <div className="side-head">
-          <div className="logo"><div className="logo-mark">A</div>ANGY ERP</div>
+          <div className="logo"><span className="logo-word">ANGY</span><img src="/img/logo.webp" alt="ERP" height={28} /></div>
           <div className="company">{me.company?.name}</div>
         </div>
         <nav className="nav">

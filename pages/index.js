@@ -27,7 +27,7 @@ export default function Auth() {
       <div className="auth-art">
         {SLIDES.map((src, i) => <div key={src} className={'auth-bg' + (i === slide ? ' on' : '')} style={{ backgroundImage: `url(${src})` }} />)}
         <div className="auth-dots">{SLIDES.map((_, i) => <button key={i} aria-label={`Image ${i + 1}`} className={i === slide ? 'on' : ''} onClick={() => setSlide(i)} />)}</div>
-        <div className="logo"><div className="logo-mark">A</div>ANGY ERP</div>
+        <div className="logo"><span className="logo-word">ANGY</span><img src="/img/logo.webp" alt="ERP" height={40} /></div>
         <div>
           <h1>Pilotez toute votre entreprise de production, du champ au client.</h1>
           <p style={{ marginTop: 16 }}>Achats, stocks par lots, fabrication et coûts de revient, ventes, caisse, qualité HACCP, traçabilité, RH et rapports — dans un seul logiciel, sur ordinateur et tablette.</p>
