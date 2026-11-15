@@ -190,7 +190,8 @@ const OPS = {
     const factor = rec ? (produced + rejected) / (n(rec.yield_qty) || 1) : 1;
     const labor = b.labor_cost !== undefined && b.labor_cost !== '' ? n(b.labor_cost) : n(po.labor_cost) || (rec ? n(rec.labor_cost) * factor : 0);
     const overhead = b.overhead_cost !== undefined && b.overhead_cost !== '' ? n(b.overhead_cost) : n(po.overhead_cost) || (rec ? n(rec.overhead_cost) * factor : 0);
-    const total = material + labor + overhead;
+    const expense = b.expense_cost !== undefined && b.expense_cost !== '' ? n(b.expense_cost) : n(po.expense_cost);
+    const total = material + labor + overhead + expense;
     const unit = total / produced;
     const lot = await stockIn(t, user, {
       item_id: po.product_id, qty: produced, unit_cost: unit, lot_number: b.lot_number || po.lot_number, expiry_date: b.expiry_date || po.expiry_date,
@@ -198,9 +199,36 @@ const OPS = {
       status: b.quarantine ? 'quarantaine' : 'ok',
     });
     await t.q(`UPDATE production_orders SET status='termine', produced_qty=$1, rejected_qty=$2, finished_at=now(), started_at=COALESCE(started_at,now()),
-      lot_id=$3, lot_number=$4, expiry_date=$5, material_cost=$6, labor_cost=$7, overhead_cost=$8, total_cost=$9, unit_cost=$10 WHERE id=$11`,
-      [produced, rejected, lot.id, lot.lot_number, lot.expiry_date, r2(material), r2(labor), r2(overhead), r2(total), unit, po.id]);
+      lot_id=$3, lot_number=$4, expiry_date=$5, material_cost=$6, labor_cost=$7, overhead_cost=$8, total_cost=$9, unit_cost=$10, expense_cost=$12 WHERE id=$11`,
+      [produced, rejected, lot.id, lot.lot_number, lot.expiry_date, r2(material), r2(labor), r2(overhead), r2(total), unit, po.id, r2(expense)]);
+    if (b.account_id && expense > 0) await cashTx(t, user, { account_id: b.account_id, amount: -expense, category: 'Production', label: `Dépenses ${po.number}`, ref_type: 'production_orders', ref_id: po.id });
     return { lot_number: lot.lot_number, unit_cost: unit, total_cost: total };
+  }],
+
+  // Production rapide : produit + volume (ou quantité) + dépenses totales → OF terminé, lot créé, coût par unité
+  prod_simple: ['production', async (t, user, b) => {
+    const item = await t.one('SELECT * FROM items WHERE id=$1 AND company_id=$2', [b.product_id, user.cid]);
+    if (!item) fail('Choisissez le produit fabriqué');
+    const uv = n(item.unit_volume);
+    const vol = n(b.volume_l);
+    let qty = n(b.qty);
+    if (!qty && vol && uv) qty = Math.round((vol / uv) * 1000) / 1000;
+    if (qty <= 0) fail(uv ? 'Indiquez le volume produit (litres) ou la quantité' : 'Indiquez la quantité produite');
+    const expense = n(b.expense_cost), labor = n(b.labor_cost);
+    if (expense + labor <= 0) fail('Indiquez les dépenses de production');
+    const total = expense + labor;
+    const unit = total / qty;
+    const date = b.date || today();
+    const number = await nextNumber(t, user.cid, 'OF', 'OF');
+    const po = await t.one(`INSERT INTO production_orders (company_id,number,product_id,planned_qty,produced_qty,status,planned_date,started_at,finished_at,
+        material_cost,labor_cost,overhead_cost,expense_cost,total_cost,unit_cost,volume_l,team,notes,user_id)
+      VALUES ($1,$2,$3,$4,$4,'termine',$5::date,$5::date,$5::date,0,$6,0,$7,$8,$9,$10,$11,$12,$13) RETURNING *`,
+      [user.cid, number, item.id, qty, date, r2(labor), r2(expense), r2(total), unit, vol || (uv ? qty * uv : null), b.team || null, b.notes || null, user.uid]);
+    const lot = await stockIn(t, user, { item_id: item.id, qty, unit_cost: unit, lot_number: b.lot_number, expiry_date: b.expiry_date, production_date: date,
+      warehouse_id: b.warehouse_id, type: 'production', ref_type: 'production_orders', ref_id: po.id, note: number });
+    await t.q('UPDATE production_orders SET lot_id=$1, lot_number=$2, expiry_date=$3 WHERE id=$4', [lot.id, lot.lot_number, lot.expiry_date, po.id]);
+    if (b.account_id && expense > 0) await cashTx(t, user, { account_id: b.account_id, amount: -expense, category: 'Production', label: `Dépenses ${number} — ${item.name}`, ref_type: 'production_orders', ref_id: po.id, date });
+    return { id: po.id, number, qty, unit_cost: unit, lot_number: lot.lot_number };
   }],
 
   // ---------- VENTES ----------

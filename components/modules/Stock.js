@@ -4,7 +4,7 @@ import { Tabs, Badge, invalidateRefs } from '../ui';
 import CrudTable from '../CrudTable';
 import ActionModal from '../ActionModal';
 
-export const UNITS = ['unité', 'kg', 'g', 'L', 'mL', 'bouteille', 'pot', 'sachet', 'carton', 'pack', 'm', 'pièce'].map((u) => [u, u]);
+export const UNITS = ['unité', 'kg', 'g', 'L', 'mL', 'bouteille', 'pot', 'sachet', 'bidon', 'carton', 'pack', 'm', 'pièce'].map((u) => [u, u]);
 
 export default function Stock() {
   const [tab, setTab] = useState('items');
@@ -61,7 +61,8 @@ function Items() {
         fields={[
           { k: 'name', l: 'Désignation', req: true }, { k: 'code', l: 'Code / référence' },
           { k: 'type', l: 'Type', t: 'select', opts: opts('item_type'), req: true }, { k: 'category_id', l: 'Catégorie', t: 'ref', ref: 'categories' },
-          { k: 'unit', l: 'Unité', t: 'select', opts: UNITS }, { k: 'barcode', l: 'Code-barres' },
+          { k: 'unit', l: 'Unité', t: 'select', opts: UNITS }, { k: 'unit_volume', l: 'Contenance par unité (litres)', t: 'number', help: 'Ex. 0,125 pour un sachet de 12,5 cl · 1 pour une bouteille d\'1 L' },
+          { k: 'barcode', l: 'Code-barres' },
           { k: 'purchase_price', l: 'Prix d\'achat', t: 'number' }, { k: 'cost_price', l: 'Coût de revient moyen', t: 'number', help: 'Mis à jour automatiquement à chaque entrée' },
           { k: 'sale_price', l: 'Prix de vente détail', t: 'number' }, { k: 'wholesale_price', l: 'Prix de vente gros', t: 'number' },
           { k: 'min_stock', l: 'Stock minimum (alerte)', t: 'number' }, { k: 'shelf_life_days', l: 'Durée de vie (jours)', t: 'number', help: 'Sert à calculer la DLC des lots' },

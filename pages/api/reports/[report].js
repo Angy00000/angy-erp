@@ -24,7 +24,7 @@ async function profitRows(cid, where, params) {
     rem AS (SELECT pl.po_id, SUM(l.qty) AS qty FROM pl JOIN lots l ON l.id=pl.lot_id GROUP BY pl.po_id),
     ex AS (SELECT production_id AS po_id, SUM(amount) AS amount FROM expenses WHERE company_id=$1 AND production_id IS NOT NULL GROUP BY 1)
     SELECT po.id, po.number, po.lot_number, po.finished_at::date::text AS date, po.produced_qty, po.rejected_qty, po.team,
-      po.material_cost, po.labor_cost, po.overhead_cost, po.total_cost, i.name AS product, i.unit, i.sale_price,
+      po.material_cost, po.labor_cost, po.overhead_cost, po.expense_cost, po.total_cost, po.volume_l, i.name AS product, i.unit, i.unit_volume, i.sale_price,
       COALESCE(ex.amount,0) AS direct_expenses, COALESCE(sold.qty,0) AS sold_qty, COALESCE(sold.revenue,0) AS revenue,
       COALESCE(lost.qty,0) AS lost_qty, COALESCE(rem.qty,0) AS remaining_qty
     FROM production_orders po JOIN items i ON i.id=po.product_id
@@ -35,9 +35,10 @@ async function profitRows(cid, where, params) {
     const unit = n(r.produced_qty) ? cost / n(r.produced_qty) : 0;
     const profit = n(r.revenue) - n(r.sold_qty) * unit;
     const remaining_value = n(r.remaining_qty) * n(r.sale_price);
+    const liters = n(r.volume_l) || n(r.produced_qty) * n(r.unit_volume);
     const projected = n(r.revenue) + remaining_value - cost;
     return {
-      ...r, real_cost: cost, real_unit_cost: unit, profit, remaining_value, projected_profit: projected,
+      ...r, real_cost: cost, real_unit_cost: unit, profit, remaining_value, projected_profit: projected, liters, liter_cost: liters ? cost / liters : null,
       sold_pct: n(r.produced_qty) ? (n(r.sold_qty) / n(r.produced_qty)) * 100 : 0,
       margin_pct: n(r.revenue) ? (profit / n(r.revenue)) * 100 : 0,
       recovered: n(r.revenue) >= cost,

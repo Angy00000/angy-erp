@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { op, crud, money, num, opts, today, report, date, LABELS } from '../../lib/client';
-import { Tabs, Badge, run, confirmDo, invalidateRefs, useData, Modal, Stat } from '../ui';
+import { Tabs, Badge, run, confirmDo, invalidateRefs, useData, Modal, Stat, useRefOptions, RefSelect, toast } from '../ui';
 import { EXPENSE_CATS } from './Caisse';
 import CrudTable from '../CrudTable';
 import ActionModal from '../ActionModal';
@@ -24,7 +24,8 @@ function Orders() {
   const close = (reload) => (ok) => { setModal(null); if (ok) { invalidateRefs('items'); invalidateRefs('lots'); reload(); } };
   return (
     <>
-      <CrudTable entity="production_orders" title="Ordre de fabrication" csvName="ordres-fabrication" newLabel="Nouvel OF"
+      <CrudTable entity="production_orders" title="Ordre de fabrication" csvName="ordres-fabrication" newLabel="OF avec recette"
+        toolbar={(reload) => <button className="btn accent" onClick={() => setModal({ k: 'quick', reload })}>⚡ Production rapide</button>}
         filters={[{ k: 'status', l: 'Statut', opts: opts('prod_status') }, { k: 'product_id', l: 'Produit', ref: 'items', params: { type: 'pf' } }]}
         columns={[
           { k: 'number', l: 'N° OF', fmt: (r) => <span className="strong">{r.number}</span>, csv: (r) => r.number },
@@ -57,6 +58,7 @@ function Orders() {
       {modal?.k === 'check' && <CheckModal row={modal.row} onClose={() => setModal(null)} />}
       {modal?.k === 'done' && <CompleteModal row={modal.row} onClose={(ok) => { const row = modal.row; close(modal.reload)(ok); if (ok) setModal({ k: 'detail', row }); }} />}
       {modal?.k === 'detail' && <ProdDetail id={modal.row.id} onClose={() => setModal(null)} />}
+      {modal?.k === 'quick' && <QuickProd onClose={(res) => { const rl = modal.reload; setModal(res ? { k: 'detail', row: { id: res.id } } : null); if (res) { invalidateRefs('items'); invalidateRefs('lots'); rl(); } }} />}
     </>
   );
 }
@@ -99,8 +101,9 @@ function CompleteModal({ row, onClose }) {
       fields={[
         { k: 'produced_qty', l: `Quantité conforme produite (${row.product_unit || ''})`, t: 'number', req: true }, { k: 'rejected_qty', l: 'Quantité rebutée / non conforme', t: 'number' },
         { k: 'lot_number', l: 'N° de lot produit fini', ph: 'Automatique si vide' }, { k: 'expiry_date', l: 'DLC', t: 'date', help: 'Vide = selon la durée de vie de l\'article' },
-        { k: 'warehouse_id', l: 'Entrepôt de stockage', t: 'ref', ref: 'warehouses' }, { k: 'labor_cost', l: 'Main-d\'œuvre réelle (optionnel)', t: 'number' },
-        { k: 'overhead_cost', l: 'Frais généraux réels (optionnel)', t: 'number' },
+        { k: 'warehouse_id', l: 'Entrepôt de stockage', t: 'ref', ref: 'warehouses' }, { k: 'expense_cost', l: 'Dépenses de production (achats du jour)', t: 'number', help: 'Ingrédients, sucre, gaz… achetés pour cette production' },
+        { k: 'account_id', l: 'Dépenses payées depuis (optionnel)', t: 'ref', ref: 'accounts', show: (x) => Number(x.expense_cost) > 0 },
+        { k: 'labor_cost', l: 'Main-d\'œuvre réelle (optionnel)', t: 'number' }, { k: 'overhead_cost', l: 'Frais généraux réels (optionnel)', t: 'number' },
         { k: 'quarantine', l: 'Placer le lot en quarantaine (libération après contrôle qualité)', t: 'bool', full: true },
       ]}
       onSubmit={async (d) => {
@@ -218,7 +221,7 @@ function Profitability() {
         <tbody>{rows.map((r) => (
           <tr key={r.id}>
             <td><span className="strong">{r.product}</span><br /><span className="muted small">{r.number} · lot <span className="mono">{r.lot_number}</span> · {date(r.date)}</span></td>
-            <td className="r">{num(r.produced_qty)} {r.unit}</td>
+            <td className="r">{num(r.produced_qty)} {r.unit}{r.liters > 0 && <><br /><span className="muted small">{num(r.liters)} L</span></>}</td>
             <td className="r">{money(r.real_cost)}</td>
             <td className="r">{money(r.real_unit_cost)}</td>
             <td className="r">{num(r.sold_qty)} <span className="muted small">({r.sold_pct.toFixed(0)} %)</span></td>
@@ -263,11 +266,14 @@ function ProdDetail({ id, onClose }) {
         <div className="grid g2">
           <div className="card card-pad">
             <h3>Combien a coûté cette production</h3>
-            <Line l="Matières premières & emballages" v={money(d.material_cost)} />
-            <Line l="Main-d'œuvre" v={money(d.labor_cost)} />
-            <Line l="Frais généraux (énergie, gaz…)" v={money(d.overhead_cost)} />
-            <Line l="Dépenses rattachées" v={money(d.direct_expenses)} />
+            {d.expense_cost > 0 && <Line l="Dépenses de production (achats)" v={money(d.expense_cost)} />}
+            {(d.material_cost > 0 || !d.expense_cost) && <Line l="Matières premières & emballages (stock)" v={money(d.material_cost)} />}
+            {(d.labor_cost > 0 || !d.expense_cost) && <Line l="Main-d'œuvre" v={money(d.labor_cost)} />}
+            {(d.overhead_cost > 0 || !d.expense_cost) && <Line l="Frais généraux (énergie, gaz…)" v={money(d.overhead_cost)} />}
+            {(d.direct_expenses > 0 || !d.expense_cost) && <Line l="Dépenses rattachées" v={money(d.direct_expenses)} />}
             <Line l="COÛT TOTAL" v={money(d.real_cost)} strong />
+            {d.liters > 0 && <Line l={`Volume produit`} v={`${num(d.liters)} L`} />}
+            {d.liters > 0 && <Line l="Coût par litre" v={money(d.liter_cost)} />}
             <Line l={`Coût de revient par ${d.unit}`} v={money(d.real_unit_cost)} strong />
             <Line l={`Prix de vente par ${d.unit}`} v={money(d.sale_price)} />
             <Line l={`Marge par ${d.unit}`} v={money(d.sale_price - d.real_unit_cost)} strong neg={d.sale_price - d.real_unit_cost < 0} />
@@ -315,6 +321,58 @@ function ProdDetail({ id, onClose }) {
         fields={[{ k: 'label', l: 'Libellé', req: true, full: true }, { k: 'amount', l: 'Montant', t: 'number', req: true }, { k: 'category', l: 'Catégorie', t: 'select', opts: EXPENSE_CATS.map((c) => [c, c]) },
           { k: 'date', l: 'Date', t: 'date', req: true }, { k: 'account_id', l: 'Payé via (compte)', t: 'ref', ref: 'accounts', help: 'Le compte sera débité automatiquement' }]}
         onSubmit={(x) => crud.create('expenses', x)} onClose={(ok) => { setAddExp(false); if (ok) reload(); }} />}
+    </Modal>
+  );
+}
+
+function QuickProd({ onClose }) {
+  const products = useRefOptions('items', { type: 'pf', active: true });
+  const [d, setD] = useState({ date: today() });
+  const [err, setErr] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const p = products.find((x) => x.id === Number(d.product_id));
+  const uv = Number(p?.unit_volume) || 0;
+  const qty = Number(d.qty) || (uv && Number(d.volume_l) ? Math.round((Number(d.volume_l) / uv) * 1000) / 1000 : 0);
+  const total = (Number(d.expense_cost) || 0) + (Number(d.labor_cost) || 0);
+  const liters = Number(d.volume_l) || (uv ? qty * uv : 0);
+  const set = (k) => (e) => setD((x) => ({ ...x, [k]: e.target.value }));
+  const submit = async () => {
+    setErr(null); setBusy(true);
+    try {
+      const r = await op('prod_simple', d);
+      toast(`Production ${r.number} enregistrée`);
+      onClose(r);
+    } catch (e) { setErr(e.message); } finally { setBusy(false); }
+  };
+  return (
+    <Modal title="⚡ Production rapide" onClose={() => onClose(null)}
+      footer={<><button className="btn" onClick={() => onClose(null)}>Annuler</button><button className="btn primary" disabled={busy} onClick={submit}>{busy ? 'Enregistrement…' : 'Enregistrer la production'}</button></>}>
+      {err && <div className="err">{err}</div>}
+      <div className="form">
+        <div className="field full"><label>Produit fabriqué <span className="req">*</span></label>
+          <select className="input" value={d.product_id || ''} onChange={(e) => setD((x) => ({ ...x, product_id: e.target.value ? Number(e.target.value) : '' }))}>
+            <option value="">— Choisir —</option>{products.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
+          </select>
+          {p && !uv && <div className="muted small" style={{ marginTop: 4 }}>Astuce : indiquez la contenance (ex. 0,125 L) dans la fiche article pour saisir en litres.</div>}
+        </div>
+        <div className="field"><label>Date de production</label><input type="date" className="input" value={d.date} onChange={set('date')} /></div>
+        {uv > 0
+          ? <div className="field"><label>Volume produit (litres) <span className="req">*</span></label><input type="number" step="any" className="input" value={d.volume_l || ''} onChange={set('volume_l')} placeholder="Ex. 18,625" /></div>
+          : <div className="field"><label>Quantité produite ({p?.unit || 'unités'}) <span className="req">*</span></label><input type="number" step="any" className="input" value={d.qty || ''} onChange={set('qty')} /></div>}
+        <div className="field"><label>Dépenses de production (FCFA) <span className="req">*</span></label><input type="number" step="any" className="input" value={d.expense_cost || ''} onChange={set('expense_cost')} placeholder="Ingrédients, sucre, sachets, gaz…" /></div>
+        <div className="field"><label>Main-d'œuvre (optionnel)</label><input type="number" step="any" className="input" value={d.labor_cost || ''} onChange={set('labor_cost')} /></div>
+        <div className="field"><label>Dépenses payées depuis (optionnel)</label><RefSelect f={{ ref: 'accounts', params: { active: true }, placeholder: 'Ne pas toucher à la caisse' }} value={d.account_id} onChange={(v) => setD((x) => ({ ...x, account_id: v }))} /></div>
+        <div className="field"><label>N° de lot (optionnel)</label><input className="input" value={d.lot_number || ''} onChange={set('lot_number')} placeholder="Automatique" /></div>
+        <div className="field"><label>Date limite (DLC)</label><input type="date" className="input" value={d.expiry_date || ''} onChange={set('expiry_date')} /></div>
+        <div className="field full"><label>Note</label><input className="input" value={d.notes || ''} onChange={set('notes')} /></div>
+      </div>
+      {p && qty > 0 && total > 0 && (
+        <div className="grid g3" style={{ marginTop: 16 }}>
+          <Stat k="Quantité obtenue" v={`${num(qty)} ${p.unit}`} s={liters ? `${num(liters)} L` : ''} />
+          <Stat k="Coût par litre" v={liters ? money(total / liters) : '—'} />
+          <Stat accent k={`Coût par ${p.unit}`} v={money(total / qty)} s={Number(p.sale_price) > 0 ? `Vendu ${money(p.sale_price)} → marge ${money(p.sale_price - total / qty)}` : 'Prix de vente non renseigné'} />
+        </div>
+      )}
     </Modal>
   );
 }
