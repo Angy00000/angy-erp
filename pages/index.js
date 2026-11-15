@@ -2,7 +2,12 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/router';
 import { api } from '../lib/client';
 
-const SLIDES = ['/img/usine-1.webp', '/img/usine-2.webp', '/img/erp.webp'];
+const SLIDES = [
+  { src: '/img/usine-1.webp', k: 'Production', t: 'Recettes, lots et coût de revient' },
+  { src: '/img/usine-2.webp', k: 'Qualité & traçabilité', t: 'Chaque bouteille suivie, du champ au client' },
+  { src: '/img/erp.webp', k: 'Pilotage', t: 'Ventes, stock, caisse et rapports en temps réel' },
+];
+const CHIPS = ['📦 Stock par lots', '⚙️ Ordres de fabrication', '💰 Coût & bénéfice par production', '🧾 Point de vente', '📱 Wave · Orange Money', '✅ HACCP & traçabilité', '👥 Paie & pointage'];
 
 export default function Auth() {
   const router = useRouter();
@@ -11,9 +16,10 @@ export default function Auth() {
   const [err, setErr] = useState(null);
   const [busy, setBusy] = useState(false);
   const [slide, setSlide] = useState(0);
-  useEffect(() => { const t = setInterval(() => setSlide((x) => (x + 1) % SLIDES.length), 6000); return () => clearInterval(t); }, []);
   useEffect(() => { api('auth/me').then(() => router.replace('/app')).catch(() => {}); }, [router]);
+  useEffect(() => { const t = setTimeout(() => setSlide((x) => (x + 1) % SLIDES.length), 6500); return () => clearTimeout(t); }, [slide]);
   const set = (k) => (e) => setD({ ...d, [k]: e.target.type === 'checkbox' ? e.target.checked : e.target.value });
+  const go = (m) => { setMode(m); setErr(null); if (typeof window !== 'undefined' && window.innerWidth < 980) document.getElementById('acces')?.scrollIntoView({ behavior: 'smooth' }); };
   const submit = async (e) => {
     e.preventDefault();
     setErr(null); setBusy(true);
@@ -22,43 +28,65 @@ export default function Auth() {
       router.replace('/app');
     } catch (e2) { setErr(e2.message); setBusy(false); }
   };
+  const cur = SLIDES[slide];
   return (
-    <div className="auth">
-      <div className="auth-art">
-        {SLIDES.map((src, i) => <div key={src} className={'auth-bg' + (i === slide ? ' on' : '')} style={{ backgroundImage: `url(${src})` }} />)}
-        <div className="auth-dots">{SLIDES.map((_, i) => <button key={i} aria-label={`Image ${i + 1}`} className={i === slide ? 'on' : ''} onClick={() => setSlide(i)} />)}</div>
-        <div className="logo"><span className="logo-word">ANGY</span><img src="/img/logo.webp" alt="ERP" height={40} /></div>
-        <div>
-          <h1>Pilotez toute votre entreprise de production, du champ au client.</h1>
-          <p style={{ marginTop: 16 }}>Achats, stocks par lots, fabrication et coûts de revient, ventes, caisse, qualité HACCP, traçabilité, RH et rapports — dans un seul logiciel, sur ordinateur et tablette.</p>
-          <div className="pills" style={{ marginTop: 22 }}>
-            {['Stock FEFO par lots', 'Ordres de fabrication', 'Coût de revient automatique', 'Point de vente', 'Wave · Orange Money', 'Plan HACCP', 'Traçabilité amont/aval', 'Paie & pointage', 'Compte de résultat'].map((p) => <span key={p} className="pill">{p}</span>)}
-          </div>
+    <div className="lp">
+      {SLIDES.map((s, i) => <div key={s.src} className={'lp-bg' + (i === slide ? ' on' : '')} style={{ backgroundImage: `url(${s.src})` }} />)}
+      <div className="lp-shade" />
+      <div className="lp-stars" aria-hidden>{Array.from({ length: 18 }).map((_, i) => <i key={i} style={{ left: `${(i * 53) % 100}%`, top: `${(i * 37) % 100}%`, animationDelay: `${(i % 6) * 0.9}s` }} />)}</div>
+
+      <header className="lp-top">
+        <div className="logo"><span className="logo-word">ANGY</span><img src="/img/logo.webp" alt="ERP" height={34} /></div>
+        <div className="lp-top-r">
+          <button className={'lp-btn ghost sm' + (mode === 'login' ? ' act' : '')} onClick={() => go('login')}>Connexion</button>
+          <button className="lp-btn sm" onClick={() => go('signup')}>Créer mon espace</button>
         </div>
-        <div className="small" style={{ color: '#8fb0a0' }}>© Angy Company — Dakar, Sénégal</div>
-      </div>
-      <div className="auth-form">
-        <form className="auth-box" onSubmit={submit}>
-          <h2>{mode === 'login' ? 'Connexion' : 'Créer votre entreprise'}</h2>
-          <p className="muted" style={{ marginTop: 0, marginBottom: 20 }}>{mode === 'login' ? 'Accédez à votre espace de gestion.' : 'Vous serez l\'administrateur du compte.'}</p>
-          {err && <div className="err">{err}</div>}
-          {mode === 'signup' && <>
-            <div className="field"><label>Nom de l'entreprise</label><input className="input" required value={d.company || ''} onChange={set('company')} /></div>
-            <div className="field"><label>Secteur d'activité</label><input className="input" placeholder="Ex. Transformation agroalimentaire" value={d.sector || ''} onChange={set('sector')} /></div>
-            <div className="field"><label>Votre nom</label><input className="input" required value={d.name || ''} onChange={set('name')} /></div>
-            <div className="field"><label>Téléphone</label><input className="input" value={d.phone || ''} onChange={set('phone')} /></div>
-          </>}
-          <div className="field"><label>Email</label><input className="input" type="email" required autoComplete="email" value={d.email || ''} onChange={set('email')} /></div>
-          <div className="field"><label>Mot de passe</label><input className="input" type="password" required minLength={6} autoComplete={mode === 'login' ? 'current-password' : 'new-password'} value={d.password || ''} onChange={set('password')} /></div>
-          {mode === 'signup' && <label className="row small" style={{ margin: '4px 0 14px' }}><input type="checkbox" checked={!!d.demo} onChange={set('demo')} /> Charger des données d'exemple (jus, recettes, HACCP) pour découvrir le logiciel</label>}
-          <button className="btn primary" style={{ width: '100%', justifyContent: 'center', minHeight: 44 }} disabled={busy}>{busy ? 'Patientez…' : mode === 'login' ? 'Se connecter' : 'Créer mon espace'}</button>
-          <div style={{ marginTop: 16, textAlign: 'center' }} className="small">
-            {mode === 'login'
-              ? <>Nouvelle entreprise ? <a href="#" onClick={(e) => { e.preventDefault(); setMode('signup'); setErr(null); }}>Créer un compte</a></>
-              : <>Déjà un compte ? <a href="#" onClick={(e) => { e.preventDefault(); setMode('login'); setErr(null); }}>Se connecter</a></>}
+      </header>
+
+      <main className="lp-main">
+        <section className="lp-hero">
+          <div className="lp-badge"><span className="flag" aria-hidden><i /><i /><i /></span>Sénégal · Logiciel de gestion de production · 2026</div>
+          <h1>Pilotez votre production,<br /><span className="lp-grad">du champ au client.</span></h1>
+          <p>Achats, stock par lots, fabrication, coût de revient et bénéfice de chaque production, ventes, caisse, qualité HACCP, RH et rapports — dans un seul logiciel, sur ordinateur, tablette et téléphone.</p>
+          <div className="lp-cta">
+            <button className="lp-btn lg" onClick={() => go('signup')}>Créer mon espace</button>
+            <button className="lp-btn ghost lg" onClick={() => go('login')}>Se connecter</button>
           </div>
-        </form>
-      </div>
+          <div className="lp-chips">{CHIPS.map((c) => <span key={c}>{c}</span>)}</div>
+        </section>
+
+        <section className="lp-card" id="acces">
+          <div className="lp-tabs">
+            <button className={mode === 'login' ? 'on' : ''} onClick={() => { setMode('login'); setErr(null); }}>Connexion</button>
+            <button className={mode === 'signup' ? 'on' : ''} onClick={() => { setMode('signup'); setErr(null); }}>Nouvelle entreprise</button>
+          </div>
+          <form onSubmit={submit}>
+            <h2>{mode === 'login' ? 'Bon retour 👋' : 'Créez votre espace'}</h2>
+            <p className="lp-sub">{mode === 'login' ? 'Accédez à votre espace de gestion.' : 'Vous serez l\'administrateur du compte.'}</p>
+            {err && <div className="lp-err">{err}</div>}
+            {mode === 'signup' && <>
+              <label>Nom de l'entreprise<input required value={d.company || ''} onChange={set('company')} placeholder="Ex. GIE FAJAR" /></label>
+              <label>Secteur d'activité<input value={d.sector || ''} onChange={set('sector')} placeholder="Ex. Transformation agroalimentaire" /></label>
+              <div className="lp-2">
+                <label>Votre nom<input required value={d.name || ''} onChange={set('name')} /></label>
+                <label>Téléphone<input value={d.phone || ''} onChange={set('phone')} /></label>
+              </div>
+            </>}
+            <label>Email<input type="email" required autoComplete="email" value={d.email || ''} onChange={set('email')} placeholder="vous@entreprise.sn" /></label>
+            <label>Mot de passe<input type="password" required minLength={6} autoComplete={mode === 'login' ? 'current-password' : 'new-password'} value={d.password || ''} onChange={set('password')} placeholder="6 caractères minimum" /></label>
+            {mode === 'signup' && <label className="lp-check"><input type="checkbox" checked={!!d.demo} onChange={set('demo')} /> Charger des données d'exemple pour découvrir le logiciel</label>}
+            <button className="lp-btn lg full" disabled={busy}>{busy ? 'Patientez…' : mode === 'login' ? 'Se connecter' : 'Créer mon espace'}</button>
+          </form>
+        </section>
+      </main>
+
+      <footer className="lp-foot">
+        <div className="lp-cap" key={slide}>
+          <div><div className="lp-cap-k">{cur.k}</div><div className="lp-cap-t">{cur.t}</div></div>
+        </div>
+        <div className="lp-bars">{SLIDES.map((_, i) => <button key={i} aria-label={`Image ${i + 1}`} onClick={() => setSlide(i)} className={i === slide ? 'on' : i < slide ? 'done' : ''}><i key={i === slide ? slide : 'x'} /></button>)}</div>
+        <div className="lp-copy">© Angy Company — Dakar, Sénégal</div>
+      </footer>
     </div>
   );
 }
