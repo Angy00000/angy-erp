@@ -24,3 +24,7 @@ npm run dev
 - `pages/api/ops/[op]` — opérations métier (stock, production, ventes, paie…)
 - `pages/api/reports/[report]` — rapports et tableaux de bord
 - `components/modules/*` — écrans de chaque module
+
+## Déploiement
+Chaque push sur `main` est déployé automatiquement sur Vercel (projet `angy-erp`, https://angy-erp.vercel.app).
+Variables d'environnement requises sur Vercel : `DATABASE_URL`, `JWT_SECRET`.
