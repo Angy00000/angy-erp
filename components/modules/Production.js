@@ -496,7 +496,7 @@ export function QuickProd({ onClose, initial, note, edit }) {
     setErr(null); setBusy(true);
     try {
       const { _exp_manual, _lab_manual, ...dd } = d; // eslint-disable-line no-unused-vars
-      const r = await op(edit ? 'prod_edit' : 'prod_simple', { ...dd, id: edit?.id, lines: rows.filter((x) => x.product_id), consumptions: usedRows.filter((x) => x.item_id && Number(x.qty) > 0) });
+      const r = await op(edit ? 'prod_edit' : 'prod_simple', { ...dd, id: edit?.id, lines: rows.filter((x) => x.product_id).map((x) => (x.qty_in ? { ...x, qty: x.qty_in } : x)), consumptions: usedRows.filter((x) => x.item_id && Number(x.qty) > 0) });
       toast(edit ? `Production ${r.number} corrigée : stock, caisse et coûts recalculés` : `Production enregistrée : ${r.number}`);
       onClose(r);
     } catch (e) { setErr(e.message); } finally { setBusy(false); }
@@ -513,9 +513,9 @@ export function QuickProd({ onClose, initial, note, edit }) {
       {edit && <div className="note" style={{ marginBottom: 12 }}>Corrigez ce qui est faux : litres, formats, ce qui a été pris dans le magasin, dépenses, date. <b>Le stock, la caisse, le coût par unité et le bénéfice sont recalculés automatiquement.</b> On ne peut pas descendre en dessous de ce qui a déjà été vendu.</div>}
       {note && <div className="note" style={{ marginBottom: 12 }}>{note}</div>}
       <h3 style={{ fontSize: 14, margin: '0 0 8px' }}>Ce qui a été produit</h3>
-      <div className="muted small" style={{ marginBottom: 8 }}>Une ligne par format. Ex. : Bissap en sachets <b>et</b> Bissap en bouteilles de 1 L. Les dépenses sont réparties selon les litres.</div>
+      <div className="muted small" style={{ marginBottom: 8 }}>Une ligne par format. Tapez <b>le nombre de sachets ou de bouteilles obtenus</b> (ou les litres) : tout le reste se calcule. Ex. : 240 sachets de bissap <b>et</b> 20 bouteilles de 1 L.</div>
       <div className="table-wrap"><table className="lines">
-        <thead><tr><th style={{ minWidth: 240 }}>Produit / format</th><th>Litres ou quantité</th><th>Obtenu</th>{total > 0 && <th className="r">Coût / unité</th>}{total > 0 && <th className="r">Marge / unité</th>}<th /></tr></thead>
+        <thead><tr><th style={{ minWidth: 240 }}>Produit / format</th><th>Nombre obtenu <span className="muted">ou</span> litres</th><th>Obtenu</th>{total > 0 && <th className="r">Coût / unité</th>}{total > 0 && <th className="r">Marge / unité</th>}<th /></tr></thead>
         <tbody>{rows.map((r, i) => {
           const c = calc[i];
           const unitCost = total > 0 && c.qty > 0 && valid.includes(c) ? (total * share(c)) / c.qty : null;
@@ -524,8 +524,11 @@ export function QuickProd({ onClose, initial, note, edit }) {
               <td><select className="input" value={r.product_id || ''} onChange={(e) => setRow(i, { product_id: e.target.value ? Number(e.target.value) : '', volume_l: '', qty: '' })}>
                 <option value="">— Choisir —</option>{products.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
               </select></td>
-              <td style={{ width: 170 }}>{c.uv > 0
-                ? <input type="number" step="any" className="input" placeholder="Litres" value={r.volume_l || ''} onChange={(e) => setRow(i, { volume_l: e.target.value })} />
+              <td style={{ width: 260 }}>{c.uv > 0
+                ? <div className="qty-pair">
+                    <label><input type="number" step="1" min="0" className="input" placeholder={`Nb de ${c.p.unit}s`} value={r.qty_in ?? (Number(r.volume_l) ? String(Math.round((Number(r.volume_l) / c.uv) * 1000) / 1000) : '')} onChange={(e) => setRow(i, { qty_in: e.target.value, volume_l: e.target.value ? String(Math.round(Number(e.target.value) * c.uv * 10000) / 10000) : '' })} /><span>{c.p.unit}s</span></label>
+                    <label><input type="number" step="any" min="0" className="input" placeholder="Litres" value={r.volume_l || ''} onChange={(e) => setRow(i, { volume_l: e.target.value, qty_in: undefined })} /><span>L</span></label>
+                  </div>
                 : <input type="number" step="any" className="input" placeholder={c.p ? c.p.unit : 'Quantité'} value={r.qty || ''} onChange={(e) => setRow(i, { qty: e.target.value })} disabled={!c.p} />}</td>
               <td className="strong" style={{ whiteSpace: 'nowrap' }}>{c.qty > 0 ? `${num(c.qty)} ${c.p.unit}${c.liters ? ` · ${num(c.liters)} L` : ''}` : <span className="muted">—</span>}
                 {r.sold > 0 && <div className={'small ' + (c.qty + 1e-9 < r.sold ? 'neg strong' : 'muted')}>{num(r.sold)} déjà vendu(s)</div>}</td>

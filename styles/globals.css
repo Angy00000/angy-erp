@@ -881,3 +881,9 @@ table.t { width: 100%; border-collapse: collapse; }
 @media (max-width: 760px) { .batch-k { min-width: 30%; } .batch-a { width: 100%; } .batch-a .btn { flex: 1; } }
 .batch-t2 td.actions { white-space: nowrap; min-width: 0; }
 .t td.actions.nw { white-space: nowrap; }
+.qty-pair { display: flex; gap: 6px; }
+.qty-pair label { position: relative; flex: 1; }
+.qty-pair input { padding-right: 52px; }
+.qty-pair span { position: absolute; right: 9px; top: 50%; transform: translateY(-50%); font-size: 11.5px; color: var(--ink-3); pointer-events: none; }
+.qty-pair input::-webkit-outer-spin-button, .qty-pair input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.qty-pair input[type=number] { -moz-appearance: textfield; }
