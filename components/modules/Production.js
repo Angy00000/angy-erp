@@ -174,6 +174,11 @@ function MRP() {
 
 function Recipes() {
   return (
+    <>
+    <div className="note" style={{ marginBottom: 12 }}>
+      <b>Une recette = ce qu'il faut pour une quantité de jus.</b> Exemple « Bissap en sachets » : produit <i>Jus de bissap (sachet 12,5 cl)</i>, quantité obtenue <b>80</b> (= 10 L), matières : bissap 0,3 kg, sucre 1 kg, sachets 80.
+      Ensuite, dans <b>⚡ Production rapide</b>, il suffit de taper les litres : ce qui est pris dans le magasin se remplit tout seul.
+    </div>
     <CrudTable entity="recipes" title="Recette / nomenclature" csvName="recettes" newLabel="Nouvelle recette"
       columns={[
         { k: 'name', l: 'Recette', fmt: (r) => <><span className="strong">{r.name}</span>{!r.active && <span className="muted small"> (inactive)</span>}</>, csv: (r) => r.name },
@@ -185,12 +190,13 @@ function Recipes() {
       defaults={{ yield_qty: 1, active: true, labor_cost: 0, overhead_cost: 0 }}
       fields={[
         { k: 'name', l: 'Nom de la recette', req: true }, { k: 'product_id', l: 'Produit fini obtenu', t: 'ref', ref: 'items', params: { active: true }, req: true },
-        { k: 'yield_qty', l: 'Quantité obtenue (rendement)', t: 'number', req: true, help: 'Pour les quantités de matières ci-dessous' }, { k: 'duration_min', l: 'Durée (minutes)', t: 'number' },
-        { k: 'labor_cost', l: 'Coût main-d\'œuvre du lot', t: 'number' }, { k: 'overhead_cost', l: 'Frais généraux du lot (énergie, gaz…)', t: 'number' },
+        { k: 'yield_qty', l: 'Quantité obtenue (en sachets, bouteilles…)', t: 'number', req: true, help: 'Ex. 80 sachets (= 10 L) pour les matières ci-dessous' }, { k: 'duration_min', l: 'Durée (minutes)', t: 'number' },
+        { k: 'labor_cost', l: 'Main-d\'œuvre pour cette quantité (optionnel)', t: 'number' }, { k: 'overhead_cost', l: 'Autres dépenses pour cette quantité (gaz, eau…)', t: 'number' },
         { k: 'instructions', l: 'Mode opératoire', t: 'textarea', full: true }, { k: 'active', l: 'Recette active', t: 'bool' },
       ]}
-      lines={{ title: 'Matières et emballages pour un lot', fields: [{ k: 'qty', l: 'Quantité', w: 140 }], showTotal: false, itemParams: { active: true } }}
+      lines={{ title: 'Matières et emballages pour cette quantité', fields: [{ k: 'qty', l: 'Quantité', w: 140 }], showTotal: false, itemParams: { active: true } }}
     />
+    </>
   );
 }
 
@@ -335,7 +341,14 @@ export function QuickProd({ onClose, initial, note }) {
   const [d, setD] = useState({ date: today() });
   const [rows, setRows] = useState(initial && initial.length ? initial : [{}]);
   const [usedRows, setUsedRows] = useState([{}]);
-  const setUsed = (i, patch) => setUsedRows((r) => r.map((x, j) => (j === i ? { ...x, ...patch } : x)));
+  const [manual, setManual] = useState(false); // l'utilisateur a modifié lui-même ce qui a été pris dans le magasin
+  const [fromRecipe, setFromRecipe] = useState(false);
+  const setUsed = (i, patch) => { setManual(true); setUsedRows((r) => r.map((x, j) => (j === i ? { ...x, ...patch } : x))); };
+  // Recettes actives, avec leurs lignes (matières et emballages pour un rendement donné)
+  const { data: recipes } = useData(async () => {
+    const list = await crud.list('recipes', { active: true }).catch(() => []);
+    return Promise.all(list.map((r) => crud.get('recipes', r.id).catch(() => ({ ...r, lines: [] }))));
+  }, []);
   const usedCalc = usedRows.map((r) => {
     const it = stockItems.find((x) => x.id === Number(r.item_id));
     const q = Number(r.qty) || 0;
@@ -344,7 +357,7 @@ export function QuickProd({ onClose, initial, note }) {
   const material = usedCalc.reduce((s, c) => s + c.value, 0);
   const [err, setErr] = useState(null);
   const [busy, setBusy] = useState(false);
-  const set = (k) => (e) => setD((x) => ({ ...x, [k]: e.target.value }));
+  const set = (k) => (e) => setD((x) => ({ ...x, [k]: e.target.value, ...(k === 'expense_cost' ? { _exp_manual: true } : k === 'labor_cost' ? { _lab_manual: true } : {}) }));
   const setRow = (i, patch) => setRows((r) => r.map((x, j) => (j === i ? { ...x, ...patch } : x)));
   const calc = rows.map((r) => {
     const p = products.find((x) => x.id === Number(r.product_id));
@@ -353,6 +366,27 @@ export function QuickProd({ onClose, initial, note }) {
     return { p, uv, qty, liters: uv ? qty * uv : 0 };
   });
   const valid = calc.filter((c) => c.p && c.qty > 0);
+  const recipeOf = (pid) => (recipes || []).find((r) => r.product_id === pid && r.active !== false && Number(r.yield_qty) > 0);
+  const withRecipe = valid.filter((c) => recipeOf(c.p.id));
+  // Calcule ce qu'il faut prendre dans le magasin à partir des recettes, au prorata des quantités produites
+  const fromRecipes = () => {
+    const agg = new Map(); let over = 0; let lab = 0;
+    for (const c of withRecipe) {
+      const r = recipeOf(c.p.id); const k = c.qty / Number(r.yield_qty);
+      for (const l of r.lines || []) agg.set(l.item_id, (agg.get(l.item_id) || 0) + Number(l.qty) * k);
+      over += Number(r.overhead_cost || 0) * k; lab += Number(r.labor_cost || 0) * k;
+    }
+    return { rows: [...agg].map(([item_id, q]) => ({ item_id, qty: String(Math.round(q * 1000) / 1000) })), over: Math.round(over), lab: Math.round(lab) };
+  };
+  const recipeKey = withRecipe.map((c) => `${c.p.id}:${c.qty}`).join('|');
+  const applyRecipes = (force) => {
+    if (!withRecipe.length) return;
+    const f = fromRecipes();
+    setUsedRows(f.rows.length ? f.rows : [{}]); setFromRecipe(true);
+    if (force) setManual(false);
+    setD((x) => ({ ...x, expense_cost: f.over && (force || !x._exp_manual) ? String(f.over) : x.expense_cost, labor_cost: f.lab && (force || !x._lab_manual) ? String(f.lab) : x.labor_cost }));
+  };
+  useEffect(() => { if (!manual && recipes) applyRecipes(false); }, [recipeKey, recipes]); // eslint-disable-line react-hooks/exhaustive-deps
   const total = material + (Number(d.expense_cost) || 0) + (Number(d.labor_cost) || 0);
   const totalL = valid.reduce((s, c) => s + c.liters, 0);
   const byLiters = valid.length > 0 && valid.every((c) => c.liters > 0);
@@ -369,7 +403,8 @@ export function QuickProd({ onClose, initial, note }) {
   const submit = async () => {
     setErr(null); setBusy(true);
     try {
-      const r = await op('prod_simple', { ...d, lines: rows.filter((x) => x.product_id), consumptions: usedRows.filter((x) => x.item_id && Number(x.qty) > 0) });
+      const { _exp_manual, _lab_manual, ...dd } = d; // eslint-disable-line no-unused-vars
+      const r = await op('prod_simple', { ...dd, lines: rows.filter((x) => x.product_id), consumptions: usedRows.filter((x) => x.item_id && Number(x.qty) > 0) });
       toast(`Production enregistrée : ${r.number}`);
       onClose(r);
     } catch (e) { setErr(e.message); } finally { setBusy(false); }
@@ -404,7 +439,12 @@ export function QuickProd({ onClose, initial, note }) {
       </table></div>
       <button className="btn sm" style={{ marginTop: 8 }} onClick={suggest}>+ Ajouter un autre format (bouteille, sachet…)</button>
 
-      <h3 style={{ fontSize: 14, margin: '20px 0 4px' }}>1. Ce qu'on a pris dans le magasin</h3>
+      <div className="row" style={{ justifyContent: 'space-between', margin: '20px 0 4px' }}>
+        <h3 style={{ fontSize: 14, margin: 0 }}>1. Ce qu'on a pris dans le magasin</h3>
+        {withRecipe.length > 0 && <button className="btn sm" onClick={() => applyRecipes(true)}>📋 {manual ? 'Recalculer avec les recettes' : 'Recettes appliquées'}</button>}
+      </div>
+      {fromRecipe && !manual && withRecipe.length > 0 && <div className="note ok-note" style={{ margin: '6px 0' }}>Rempli automatiquement avec {withRecipe.length > 1 ? 'les recettes' : 'la recette'} ({withRecipe.map((c) => recipeOf(c.p.id).name).join(', ')}). Corrigez si vous avez utilisé autre chose.</div>}
+      {valid.length > 0 && withRecipe.length < valid.length && recipes && <div className="muted small" style={{ margin: '4px 0' }}>Astuce : créez une recette pour {valid.filter((c) => !recipeOf(c.p.id)).map((c) => c.p.name).join(', ')} (Production → Recettes) et cette partie se remplira toute seule.</div>}
       <div className="muted small" style={{ marginBottom: 8 }}>Matières premières et emballages déjà en stock (bissap, sucre, sachets, bouteilles…). Ils seront <b>retirés du stock</b> et leur prix d'achat compté dans le coût.</div>
       <div className="table-wrap"><table className="lines">
         <thead><tr><th style={{ minWidth: 240 }}>Article</th><th>En stock</th><th style={{ width: 150 }}>Quantité utilisée</th><th className="r">Valeur</th><th /></tr></thead>
@@ -424,13 +464,13 @@ export function QuickProd({ onClose, initial, note }) {
               <td><input type="number" step="any" className="input" placeholder={c.it?.unit || 'Quantité'} value={r.qty || ''} onChange={(e) => setUsed(i, { qty: e.target.value })} disabled={!c.it} />
                 {c.short && <div className="neg small strong">Stock insuffisant</div>}</td>
               <td className="r mono">{c.q > 0 ? (itemCost(c.it) ? money(c.value) : <span className="muted small">prix d'achat non renseigné</span>) : ''}</td>
-              <td>{usedRows.length > 1 && <button className="btn sm ghost" onClick={() => setUsedRows((x) => x.filter((_, j) => j !== i))}>✕</button>}</td>
+              <td>{usedRows.length > 1 && <button className="btn sm ghost" onClick={() => { setManual(true); setUsedRows((x) => x.filter((_, j) => j !== i)); }}>✕</button>}</td>
             </tr>
           );
         })}</tbody>
         {material > 0 && <tfoot><tr><td colSpan={3} className="strong">Valeur prise dans le stock</td><td className="r mono strong">{money(material)}</td><td /></tr></tfoot>}
       </table></div>
-      <button className="btn sm" style={{ marginTop: 8 }} onClick={() => setUsedRows((r) => [...r, {}])}>+ Ajouter un article du magasin</button>
+      <button className="btn sm" style={{ marginTop: 8 }} onClick={() => { setManual(true); setUsedRows((r) => [...r, {}]); }}>+ Ajouter un article du magasin</button>
       {!stockItems.length && allItems && <div className="note" style={{ marginTop: 8 }}>Aucune matière ni emballage enregistré. Créez-les dans <b>Stock & Articles</b> puis faites une <b>Entrée stock</b> : ils apparaîtront ici.</div>}
 
       <h3 style={{ fontSize: 14, margin: '20px 0 4px' }}>2. Les autres dépenses</h3>

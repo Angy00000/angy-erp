@@ -684,3 +684,10 @@ table.t { width: 100%; border-collapse: collapse; }
 .order-l td { padding: 6px 4px; }
 .warn-t { color: #c26a00; }
 .link-btn { background: none; border: 0; color: var(--accent2, #c2410c); font-weight: 700; font-size: 11.5px; cursor: pointer; padding: 0 0 0 6px; }
+.note.ok-note { background: #e8f6ee; border-color: #b9e4cb; color: #165c37; }
+[data-theme="dark"] .note.ok-note { background: #12301f; border-color: #1f5a37; color: #a6e7c0; }
+
+/* ---------- Résumé du jour ---------- */
+.wa-btn { background: #25d366 !important; color: #fff !important; border-color: #25d366 !important; }
+.wa-btn:hover { filter: brightness(1.05); }
+.daily-txt { white-space: pre-wrap; font-family: Manrope, sans-serif; font-size: 13.5px; line-height: 1.55; background: var(--bg2, #f6f5f0); border: 1px solid var(--line, #e7e5dc); border-radius: 12px; padding: 14px 16px; max-height: 55vh; overflow: auto; margin: 0; }

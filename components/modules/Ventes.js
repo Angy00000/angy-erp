@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { op, crud, money, num, date, opts, today, LABELS } from '../../lib/client';
 import { Tabs, Badge, useRefOptions, useData, run, confirmDo, invalidateRefs, toast } from '../ui';
 import Commandes from './Commandes';
+import Depots from './Depots';
 import CrudTable from '../CrudTable';
 import ActionModal from '../ActionModal';
 
@@ -11,9 +12,10 @@ export default function Ventes({ can }) {
   const [tab, setTab] = useState('pos');
   return (
     <div>
-      <Tabs value={tab} onChange={setTab} tabs={[['pos', 'Point de vente'], ['cmd', 'Commandes clients'], ['docs', 'Factures, devis & commandes'], ['clients', 'Clients'], ['pay', 'Encaissements']]} />
+      <Tabs value={tab} onChange={setTab} tabs={[['pos', 'Point de vente'], ['cmd', 'Commandes clients'], ['depots', 'Vendeurs & dépôts'], ['docs', 'Factures, devis & commandes'], ['clients', 'Clients'], ['pay', 'Encaissements']]} />
       {tab === 'pos' && <POS />}
       {tab === 'cmd' && <Commandes canProduce={!can || can('production')} />}
+      {tab === 'depots' && <Depots />}
       {tab === 'docs' && <Docs />}
       {tab === 'clients' && <Clients />}
       {tab === 'pay' && <Payments />}

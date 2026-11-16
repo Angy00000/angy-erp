@@ -1,5 +1,6 @@
-import { report, money, num, date, daysUntil } from '../../lib/client';
-import { useData, Badge } from '../ui';
+import { useState } from 'react';
+import { report, money, num, date, daysUntil, api, today } from '../../lib/client';
+import { useData, Badge, Modal, toast } from '../ui';
 
 // ---------- Icônes (traits fins) ----------
 const P = {
@@ -228,7 +229,25 @@ function ProdProfit({ p, go }) {
   );
 }
 
+function DailySummary({ onClose }) {
+  const [day, setDay] = useState(today());
+  const { data, loading } = useData(() => api('app/daily', { params: { date: day } }), [day]);
+  const text = data?.text || '';
+  return (
+    <Modal title="Résumé de la journée" onClose={onClose}
+      footer={<>
+        <button className="btn" onClick={() => { navigator.clipboard?.writeText(text).then(() => toast('Résumé copié')).catch(() => toast('Copie impossible', 'error')); }} disabled={!text}>Copier</button>
+        <a className={'btn primary' + (!text ? ' disabled' : '')} href={`https://wa.me/?text=${encodeURIComponent(text)}`} target="_blank" rel="noreferrer"><Ic n="whatsapp" s={16} /> Envoyer sur WhatsApp</a>
+      </>}>
+      <div className="row" style={{ marginBottom: 10 }}><label className="small muted">Journée du</label><input type="date" className="input sm" value={day} max={today()} onChange={(e) => setDay(e.target.value || today())} style={{ width: 170 }} /></div>
+      {loading && !data ? <div className="spinner">Préparation du résumé…</div> : <pre className="daily-txt">{text.replace(/\*([^*\n]+)\*/g, '$1').replace(/_([^_\n]+)_/g, '$1')}</pre>}
+      <p className="muted small" style={{ margin: '8px 0 0' }}>« Envoyer sur WhatsApp » ouvre WhatsApp : choisissez la présidente ou le groupe du GIE.</p>
+    </Modal>
+  );
+}
+
 function Hero({ d, cashTotal, user, company, go, can }) {
+  const [daily, setDaily] = useState(false);
   const h = new Date().getHours();
   const hello = h < 12 ? 'Bonjour' : h < 18 ? 'Bon après-midi' : 'Bonsoir';
   const first = (user?.name || '').split(' ')[0];
@@ -239,13 +258,15 @@ function Hero({ d, cashTotal, user, company, go, can }) {
     d.month_prod && ['Bénéfice du mois', money(d.month_prod.profit), `${d.month_prod.count} production(s)`],
   ].filter(Boolean);
   return (
+    <>
     <div className="hero" style={{ backgroundImage: 'url(/img/usine-2.webp)' }}>
       <div className="hero-in">
         <div>
           <div className="hk">{hello}{first ? `, ${first}` : ''}</div>
           <h2>{company?.name || 'Votre entreprise'}</h2>
           <p>{new Date().toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</p>
-          <div className="row" style={{ marginTop: 16 }}>{actions.map(([m, l, primary]) => <button key={m} className={'btn' + (primary ? ' accent' : '')} onClick={() => go(m)}>{l}</button>)}</div>
+          <div className="row" style={{ marginTop: 16, flexWrap: 'wrap' }}>{actions.map(([m, l, primary]) => <button key={m} className={'btn' + (primary ? ' accent' : '')} onClick={() => go(m)}>{l}</button>)}
+            <button className="btn wa-btn" onClick={() => setDaily(true)}><Ic n="whatsapp" s={16} /> Résumé du jour</button></div>
         </div>
         {tiles.length > 0 && (
           <div className="hero-tiles">
@@ -254,6 +275,8 @@ function Hero({ d, cashTotal, user, company, go, can }) {
         )}
       </div>
     </div>
+    {daily && <DailySummary onClose={() => setDaily(false)} />}
+    </>
   );
 }
 

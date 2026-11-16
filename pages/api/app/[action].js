@@ -69,6 +69,90 @@ export default handler(async (req, res, user) => {
     return out;
   }
 
+  // Résumé de la journée, prêt à envoyer sur WhatsApp
+  if (action === 'daily') {
+    const day = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.date || '')) ? req.query.date : new Date().toISOString().slice(0, 10);
+    const co = await one('SELECT name FROM companies WHERE id=$1', [cid]);
+    const F = (v) => `${Math.round(Number(v) || 0).toLocaleString('fr-FR').replace(/\u202f|\u00a0/g, ' ')} F`;
+    const N = (v) => (Math.round((Number(v) || 0) * 1000) / 1000).toLocaleString('fr-FR').replace(/\u202f|\u00a0/g, ' ');
+    const dd = new Date(day + 'T12:00:00Z').toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' });
+    const out = { date: day, sections: [] };
+    const L = [`*${co?.name || 'Résumé'} — résumé du ${dd}*`];
+    if (c('ventes') || c('caisse')) {
+      const sales = await one(`SELECT COUNT(*) AS n, COALESCE(SUM(total),0) AS total, COALESCE(SUM(total-cost),0) AS margin FROM sales_docs
+        WHERE company_id=$1 AND type='facture' AND date=$2 AND status NOT IN ('brouillon','annule')`, [cid, day]);
+      const byProd = await q(`SELECT i.name, i.unit, SUM(sl.qty) AS qty, SUM(sl.total) AS total FROM sales_lines sl JOIN sales_docs d ON d.id=sl.doc_id JOIN items i ON i.id=sl.item_id
+        WHERE d.company_id=$1 AND d.type='facture' AND d.date=$2 AND d.status NOT IN ('brouillon','annule') GROUP BY i.name, i.unit ORDER BY 4 DESC LIMIT 8`, [cid, day]);
+      const pays = await q(`SELECT a.name, SUM(p.amount) AS amount FROM payments p JOIN accounts a ON a.id=p.account_id WHERE p.company_id=$1 AND p.direction='in' AND p.date=$2 GROUP BY a.name ORDER BY 2 DESC`, [cid, day]);
+      L.push('', `🛒 *Ventes* : ${F(sales.total)} (${sales.n} vente${Number(sales.n) > 1 ? 's' : ''})${Number(sales.total) > 0 ? ` — marge ${F(sales.margin)}` : ''}`);
+      for (const r of byProd) L.push(`  • ${r.name} : ${N(r.qty)} ${r.unit || ''} = ${F(r.total)}`);
+      if (pays.length) { L.push(`💰 *Argent reçu* : ${F(pays.reduce((s, x) => s + Number(x.amount), 0))}`); for (const r of pays) L.push(`  • ${r.name} : ${F(r.amount)}`); }
+      out.sales = sales;
+    }
+    if (c('caisse')) {
+      const exp = await q(`SELECT category, label, amount FROM expenses WHERE company_id=$1 AND date=$2 ORDER BY amount DESC`, [cid, day]);
+      const tot = exp.reduce((s, x) => s + Number(x.amount), 0);
+      L.push('', `🧾 *Dépenses* : ${exp.length ? F(tot) : 'aucune'}`); for (const r of exp.slice(0, 6)) L.push(`  • ${r.label || r.category} : ${F(r.amount)}`);
+      if (exp.length > 6) L.push(`  • … et ${exp.length - 6} autre(s)`);
+      const bal = await q(`SELECT a.name, a.initial_balance+COALESCE((SELECT SUM(amount) FROM cash_transactions t WHERE t.account_id=a.id AND t.date<=$2),0) AS b
+        FROM accounts a WHERE a.company_id=$1 AND a.active ORDER BY a.id`, [cid, day]);
+      L.push(`🏦 *Soldes en fin de journée* : ${F(bal.reduce((s, x) => s + Number(x.b), 0))}`); for (const r of bal) L.push(`  • ${r.name} : ${F(r.b)}`);
+    }
+    if (c('production')) {
+      const prods = await q(`SELECT i.name, i.unit, SUM(po.produced_qty) AS qty, SUM(COALESCE(po.volume_l,0)) AS liters, SUM(po.total_cost) AS cost,
+          SUM(po.produced_qty*i.sale_price) AS value FROM production_orders po JOIN items i ON i.id=po.product_id
+        WHERE po.company_id=$1 AND po.status='termine' AND COALESCE(po.finished_at::date, po.planned_date)=$2 GROUP BY i.name, i.unit ORDER BY 1`, [cid, day]);
+      if (prods.length) {
+        const cost = prods.reduce((s, x) => s + Number(x.cost), 0), value = prods.reduce((s, x) => s + Number(x.value), 0), lit = prods.reduce((s, x) => s + Number(x.liters), 0);
+        L.push('', `🏭 *Production* : ${lit ? `${N(lit)} L — ` : ''}coût ${F(cost)}, bénéfice prévu ${F(value - cost)}`);
+        for (const r of prods) L.push(`  • ${r.name} : ${N(r.qty)} ${r.unit || ''}`);
+      } else L.push('', '🏭 *Production* : aucune ce jour');
+    }
+    if (c('stock') || c('production') || c('ventes')) {
+      const pf = await q(`SELECT i.name, i.unit, COALESCE((SELECT SUM(qty) FROM lots l WHERE l.item_id=i.id AND l.status='ok'),0) AS s FROM items i
+        WHERE i.company_id=$1 AND i.active AND i.type='pf' ORDER BY i.name`, [cid]);
+      if (pf.length) { L.push('', '📦 *Stock de produits finis*'); for (const r of pf) L.push(`  • ${r.name} : ${N(r.s)} ${r.unit || ''}`); }
+      const low = await q(`SELECT * FROM (SELECT i.name,i.unit,i.min_stock, COALESCE((SELECT SUM(qty) FROM lots l WHERE l.item_id=i.id AND l.status='ok'),0) AS s
+        FROM items i WHERE i.company_id=$1 AND i.active AND i.min_stock>0) x WHERE s<min_stock ORDER BY name`, [cid]);
+      if (low.length) { L.push(`⚠️ *Stock bas* : ${low.map((r) => `${r.name} (${N(r.s)} ${r.unit || ''})`).join(', ')}`); }
+    }
+    if (c('ventes') || c('production')) {
+      const { orders, needs } = await openOrders(cid);
+      const soon = orders.filter((o) => o.days !== null && o.days <= 1);
+      if (orders.length) {
+        L.push('', `📋 *Commandes en cours* : ${orders.length}${soon.length ? ` (dont ${soon.length} à livrer d'ici demain)` : ''}`);
+        for (const o of soon.slice(0, 5)) L.push(`  • ${o.number} — ${o.customer_name || 'client'} : ${o.days < 0 ? 'EN RETARD' : o.days === 0 ? "aujourd'hui" : 'demain'}${o.ready ? ' ✅ prête' : ' ❗ à produire'}`);
+        const miss = needs.filter((x) => x.missing > 0);
+        if (miss.length) L.push(`  À produire : ${miss.map((x) => `${x.name} ${N(x.missing)} ${x.unit || ''}${x.missing_l ? ` (${N(x.missing_l)} L)` : ''}`).join(', ')}`);
+      }
+    }
+    if (c('ventes')) {
+      const dep = await one(`SELECT COUNT(*) AS n, COALESCE(SUM((SELECT SUM(qty_out*unit_price) FROM consignment_lines WHERE consignment_id=k.id)),0) AS v FROM consignments k WHERE k.company_id=$1 AND k.status='ouvert'`, [cid]);
+      const debt = await one(`SELECT COALESCE(SUM(total-paid),0) AS d FROM sales_docs WHERE company_id=$1 AND type='facture' AND status IN ('valide','partiel')`, [cid]);
+      if (Number(dep.n) > 0) L.push('', `🚶 *Chez les vendeurs* : ${F(dep.v)} de produits (${dep.n} dépôt${Number(dep.n) > 1 ? 's' : ''} en cours)`);
+      if (Number(debt.d) > 0.5) L.push(`${Number(dep.n) > 0 ? '' : '\n'}📌 *Reste à encaisser (clients et vendeurs)* : ${F(debt.d)}`);
+    }
+    L.push('', '_Envoyé depuis ANGY ERP_');
+    out.text = L.join('\n');
+    return out;
+  }
+
+  if (action === 'depots') {
+    if (!c('ventes')) fail('Accès refusé', 403);
+    const open = await q(`SELECT k.id,k.number,k.date,k.tier,k.notes,k.customer_id,cu.name AS seller,cu.phone,(current_date-k.date) AS days
+      FROM consignments k LEFT JOIN customers cu ON cu.id=k.customer_id WHERE k.company_id=$1 AND k.status='ouvert' ORDER BY k.date, k.id`, [cid]);
+    const done = await q(`SELECT k.id,k.number,k.date,k.settled_at,cu.name AS seller,cu.phone,d.id AS sale_id,d.number AS sale_number,COALESCE(d.total,0) AS total,COALESCE(d.paid,0) AS paid,
+        (SELECT SUM(qty_returned) FROM consignment_lines WHERE consignment_id=k.id) AS returned,(SELECT SUM(qty_lost) FROM consignment_lines WHERE consignment_id=k.id) AS lost
+      FROM consignments k LEFT JOIN customers cu ON cu.id=k.customer_id LEFT JOIN sales_docs d ON d.id=k.sale_id
+      WHERE k.company_id=$1 AND k.status='regle' ORDER BY k.settled_at DESC LIMIT 60`, [cid]);
+    const ids = open.map((x) => x.id);
+    const lines = ids.length ? await q(`SELECT cl.*, i.name, i.unit FROM consignment_lines cl JOIN items i ON i.id=cl.item_id WHERE cl.consignment_id = ANY($1::int[]) ORDER BY cl.id`, [ids]) : [];
+    for (const o of open) { o.lines = lines.filter((l) => l.consignment_id === o.id); o.value = o.lines.reduce((s, l) => s + n(l.qty_out) * n(l.unit_price), 0); }
+    const debts = await q(`SELECT cu.id, cu.name, cu.phone, SUM(d.total-d.paid) AS due FROM sales_docs d JOIN customers cu ON cu.id=d.customer_id
+      WHERE d.company_id=$1 AND d.type='facture' AND d.channel='depot' AND d.status IN ('valide','partiel') GROUP BY cu.id HAVING SUM(d.total-d.paid)>0.5 ORDER BY 4 DESC`, [cid]);
+    return { open, done, debts };
+  }
+
   if (action === 'orders') {
     if (!c('ventes') && !c('production')) fail('Accès refusé', 403);
     return openOrders(cid);
