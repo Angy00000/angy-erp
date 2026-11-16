@@ -451,6 +451,40 @@ export function QuickProd({ onClose, initial, note, edit }) {
   const [busy, setBusy] = useState(false);
   const set = (k) => (e) => setD((x) => ({ ...x, [k]: e.target.value, ...(k === 'expense_cost' ? { _exp_manual: true } : k === 'labor_cost' ? { _lab_manual: true } : {}) }));
   const setRow = (i, patch) => setRows((r) => r.map((x, j) => (j === i ? { ...x, ...patch } : x)));
+  // Produits regroupés par jus : « Jus de bissap » → sachet 12,5 cl, bouteille 25 cl, bouteille 1 L
+  const famList = (() => {
+    const m = new Map();
+    for (const it of products) { const f = famOf(it.name).fam; if (!m.has(f)) m.set(f, []); m.get(f).push(it); }
+    for (const v of m.values()) v.sort((x, y) => (Number(x.unit_volume) || 0) - (Number(y.unit_volume) || 0));
+    return [...m].map(([name, items]) => ({ name, items })).sort((x, y) => x.name.localeCompare(y.name, 'fr'));
+  })();
+  const [fams, setFams] = useState(() => {
+    const src = edit ? edit.lines.map((l) => l.name) : (initial || []).map((r) => products.find((p) => p.id === Number(r.product_id))?.name).filter(Boolean);
+    const f = [...new Set(src.map((n2) => famOf(n2).fam))];
+    return f.length ? f : [''];
+  });
+  // S'assure qu'il y a une ligne par format pour chaque jus choisi (les produits arrivent après le premier affichage)
+  useEffect(() => {
+    if (!products.length) return;
+    setRows((r) => {
+      const ids = new Set(r.map((x) => Number(x.product_id)));
+      const add = [];
+      for (const f of fams) { const g = famList.find((x) => x.name === f); if (g) for (const it of g.items) if (!ids.has(it.id)) add.push({ product_id: it.id }); }
+      const keep = r.filter((x) => x.product_id);
+      return add.length || keep.length !== r.length ? [...keep, ...add] : r;
+    });
+  }, [fams.join('|'), products.length]); // eslint-disable-line react-hooks/exhaustive-deps
+  const pickFam = (k, name) => {
+    const old = fams[k];
+    const oldIds = (famList.find((x) => x.name === old)?.items || []).map((x) => x.id);
+    setRows((r) => r.filter((x) => !oldIds.includes(Number(x.product_id))));
+    setFams((f) => f.map((x, j) => (j === k ? name : x)));
+  };
+  const dropFam = (k) => {
+    const ids = (famList.find((x) => x.name === fams[k])?.items || []).map((x) => x.id);
+    setRows((r) => r.filter((x) => !ids.includes(Number(x.product_id))));
+    setFams((f) => f.filter((_, j) => j !== k));
+  };
   const calc = rows.map((r) => {
     const p = products.find((x) => x.id === Number(r.product_id));
     const uv = Number(p?.unit_volume) || 0;
@@ -513,33 +547,45 @@ export function QuickProd({ onClose, initial, note, edit }) {
       {edit && <div className="note" style={{ marginBottom: 12 }}>Corrigez ce qui est faux : litres, formats, ce qui a été pris dans le magasin, dépenses, date. <b>Le stock, la caisse, le coût par unité et le bénéfice sont recalculés automatiquement.</b> On ne peut pas descendre en dessous de ce qui a déjà été vendu.</div>}
       {note && <div className="note" style={{ marginBottom: 12 }}>{note}</div>}
       <h3 style={{ fontSize: 14, margin: '0 0 8px' }}>Ce qui a été produit</h3>
-      <div className="muted small" style={{ marginBottom: 8 }}>Une ligne par format. Tapez <b>le nombre de sachets ou de bouteilles obtenus</b> (ou les litres) : tout le reste se calcule. Ex. : 240 sachets de bissap <b>et</b> 20 bouteilles de 1 L.</div>
-      <div className="table-wrap"><table className="lines">
-        <thead><tr><th style={{ minWidth: 240 }}>Produit / format</th><th>Nombre obtenu <span className="muted">ou</span> litres</th><th>Obtenu</th>{total > 0 && <th className="r">Coût / unité</th>}{total > 0 && <th className="r">Marge / unité</th>}<th /></tr></thead>
-        <tbody>{rows.map((r, i) => {
-          const c = calc[i];
-          const unitCost = total > 0 && c.qty > 0 && valid.includes(c) ? (total * share(c)) / c.qty : null;
-          return (
-            <tr key={i}>
-              <td><select className="input" value={r.product_id || ''} onChange={(e) => setRow(i, { product_id: e.target.value ? Number(e.target.value) : '', volume_l: '', qty: '' })}>
-                <option value="">— Choisir —</option>{products.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
-              </select></td>
-              <td style={{ width: 260 }}>{c.uv > 0
-                ? <div className="qty-pair">
-                    <label><input type="number" step="1" min="0" className="input" placeholder={`Nb de ${c.p.unit}s`} value={r.qty_in ?? (Number(r.volume_l) ? String(Math.round((Number(r.volume_l) / c.uv) * 1000) / 1000) : '')} onChange={(e) => setRow(i, { qty_in: e.target.value, volume_l: e.target.value ? String(Math.round(Number(e.target.value) * c.uv * 10000) / 10000) : '' })} /><span>{c.p.unit}s</span></label>
-                    <label><input type="number" step="any" min="0" className="input" placeholder="Litres" value={r.volume_l || ''} onChange={(e) => setRow(i, { volume_l: e.target.value, qty_in: undefined })} /><span>L</span></label>
+      <div className="muted small" style={{ marginBottom: 10 }}>Choisissez le jus, puis tapez <b>le nombre de sachets ou de bouteilles obtenus</b> pour chaque format. Laissez vide les formats que vous n'avez pas faits. Tout le reste se calcule.</div>
+      {fams.map((fam, k) => {
+        const g = famList.find((x) => x.name === fam);
+        const famRows = g ? g.items.map((it) => ({ it, i: rows.findIndex((r) => Number(r.product_id) === it.id) })) : [];
+        const lit = famRows.reduce((s2, x) => s2 + (x.i >= 0 ? calc[x.i].liters : 0), 0);
+        const locked = famRows.some((x) => x.i >= 0 && rows[x.i].sold > 0);
+        return (
+          <div key={k} className="pq-fam">
+            <div className="pq-head">
+              <select className="input" value={fam} disabled={locked} onChange={(e) => pickFam(k, e.target.value)}>
+                <option value="">— Choisir le jus —</option>
+                {famList.map((x) => <option key={x.name} value={x.name} disabled={x.name !== fam && fams.includes(x.name)}>{x.name}</option>)}
+              </select>
+              {lit > 0 && <span className="pq-total">{num(Math.round(lit * 1000) / 1000)} L</span>}
+              {fams.length > 1 && !locked && <button className="btn sm ghost" onClick={() => dropFam(k)} title="Retirer ce jus">✕</button>}
+            </div>
+            {g && <div className="pq-fmts">
+              {famRows.map(({ it, i }) => {
+                const r = rows[i] || {}; const c = i >= 0 ? calc[i] : { qty: 0, liters: 0, uv: Number(it.unit_volume) || 0 };
+                const unitCost = total > 0 && c.qty > 0 && valid.includes(c) ? (total * share(c)) / c.qty : null;
+                const fmt = famOf(it.name).fmt || it.name;
+                const val = c.uv > 0 ? (r.qty_in ?? (Number(r.volume_l) ? String(Math.round((Number(r.volume_l) / c.uv) * 1000) / 1000) : '')) : (r.qty || '');
+                const setN = (v) => setRow(i, c.uv > 0 ? { qty_in: v, volume_l: v ? String(Math.round(Number(v) * c.uv * 10000) / 10000) : '' } : { qty: v });
+                return (
+                  <div key={it.id} className={'pq-fmt' + (c.qty > 0 ? ' on' : '')}>
+                    <div className="pq-name"><b>{fmt.charAt(0).toUpperCase() + fmt.slice(1)}</b><span>{money(it.sale_price)} l'unité</span></div>
+                    <label className="pq-in"><input type="number" min="0" step="1" className="input" placeholder="0" value={val} onChange={(e) => setN(e.target.value)} /><span>{it.unit}s</span></label>
+                    <div className="pq-res">
+                      {c.qty > 0 ? <>{c.liters > 0 && <b>= {num(c.liters)} L</b>}{unitCost != null && <span>coût {money(unitCost)} · <em className={Number(it.sale_price) - unitCost < 0 ? 'neg' : 'pos'}>marge {money(Number(it.sale_price) - unitCost)}</em></span>}</> : <span className="muted">pas produit</span>}
+                      {r.sold > 0 && <span className={c.qty + 1e-9 < r.sold ? 'neg strong' : 'muted'}>{num(r.sold)} déjà vendu(s)</span>}
+                    </div>
                   </div>
-                : <input type="number" step="any" className="input" placeholder={c.p ? c.p.unit : 'Quantité'} value={r.qty || ''} onChange={(e) => setRow(i, { qty: e.target.value })} disabled={!c.p} />}</td>
-              <td className="strong" style={{ whiteSpace: 'nowrap' }}>{c.qty > 0 ? `${num(c.qty)} ${c.p.unit}${c.liters ? ` · ${num(c.liters)} L` : ''}` : <span className="muted">—</span>}
-                {r.sold > 0 && <div className={'small ' + (c.qty + 1e-9 < r.sold ? 'neg strong' : 'muted')}>{num(r.sold)} déjà vendu(s)</div>}</td>
-              {total > 0 && <td className="r mono">{unitCost != null ? money(unitCost) : ''}</td>}
-              {total > 0 && <td className="r mono">{unitCost != null && Number(c.p.sale_price) > 0 ? <span className={c.p.sale_price - unitCost < 0 ? 'neg strong' : 'pos strong'}>{money(c.p.sale_price - unitCost)}</span> : ''}</td>}
-              <td>{rows.length > 1 && !(r.sold > 0) && <button className="btn sm ghost" onClick={() => setRows((x) => x.filter((_, j) => j !== i))}>✕</button>}</td>
-            </tr>
-          );
-        })}</tbody>
-      </table></div>
-      <button className="btn sm" style={{ marginTop: 8 }} onClick={suggest}>+ Ajouter un autre format (bouteille, sachet…)</button>
+                );
+              })}
+            </div>}
+          </div>
+        );
+      })}
+      <button className="btn sm" style={{ marginTop: 4 }} onClick={() => setFams((f) => [...f, ''])}>+ Ajouter un autre jus</button>
 
       <div className="row" style={{ justifyContent: 'space-between', margin: '20px 0 4px' }}>
         <h3 style={{ fontSize: 14, margin: 0 }}>1. Ce qu'on a pris dans le magasin</h3>
