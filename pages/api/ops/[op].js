@@ -64,6 +64,18 @@ async function requirements(t, user, po, qtyOverride) {
   return { lines: out, recipe: rec, factor };
 }
 
+const num3 = (v) => String(Math.round(n(v) * 1000) / 1000).replace('.', ',');
+// Retire une ligne d'achat du stock (seulement si rien n'a encore été utilisé)
+async function removePurchaseLine(t, user, pur, o, used, keepLine) {
+  if (used > 1e-9) fail(`${String(o.name).trim()} : ${num3(used)} déjà utilisé(s) en production ou vendu(s). Impossible de l'enlever de l'achat.`);
+  if (o.lot_id) {
+    await t.q('UPDATE lots SET qty=qty-$1 WHERE id=$2', [n(o.qty), o.lot_id]);
+    await t.q(`INSERT INTO stock_movements (company_id,item_id,lot_id,type,qty,unit_cost,ref_type,ref_id,note,user_id) VALUES ($1,$2,$3,'annulation',$4,$5,'purchases',$6,$7,$8)`,
+      [user.cid, o.item_id, o.lot_id, -n(o.qty), n(o.unit_cost), pur.id, `${pur.number} — retiré de l'achat`, user.uid]);
+  }
+  if (!keepLine) await t.q('DELETE FROM purchase_items WHERE id=$1', [o.id]);
+}
+
 const OPS = {
   // ---------- STOCK ----------
   // Entrée en stock (achat, don, retour…). Si « Payé via » est choisi, l'argent sort du compte.
@@ -76,22 +88,67 @@ const OPS = {
     }
     return lot;
   }],
-  // Nouvel achat (marché, boutique, grossiste…) : plusieurs articles d'un coup, entrés en stock et payés en une fois
+  // Nouvel achat (marché, boutique, grossiste…) : plusieurs articles d'un coup, entrés en stock et payés en une fois.
+  // Avec b.id : modification d'un achat existant (quantités, prix, articles, caisse, date).
   market_purchase: [['stock', 'achats'], async (t, user, b) => {
     const lines = (b.lines || []).filter((l) => Number(l.item_id) && n(l.qty) > 0);
     if (!lines.length) fail('Ajoutez au moins un article avec une quantité');
-    let total = 0; const names = [];
+    for (const l of lines) if (n(l.unit_cost) < 0) fail('Prix invalide');
+    const date = b.date || today();
+    const total = r2(lines.reduce((s, l) => s + n(l.qty) * n(l.unit_cost), 0));
+    let pur;
+    if (b.id) {
+      pur = await t.one('SELECT * FROM purchases WHERE id=$1 AND company_id=$2 FOR UPDATE', [b.id, user.cid]);
+      if (!pur) fail('Achat introuvable');
+      if (pur.status !== 'ok') fail('Cet achat est annulé');
+      const old = await t.q('SELECT pl.*, i.name, l.qty AS lot_qty FROM purchase_items pl JOIN items i ON i.id=pl.item_id LEFT JOIN lots l ON l.id=pl.lot_id WHERE pl.purchase_id=$1 ORDER BY pl.id', [pur.id]);
+      for (const o of old) {
+        const nl = lines.find((l) => Number(l.id) === o.id && Number(l.item_id) === o.item_id);
+        const used = o.lot_id ? Math.max(0, n(o.qty) - n(o.lot_qty)) : 0;
+        if (nl) {
+          nl._kept = true;
+          if (n(nl.qty) + 1e-9 < used) fail(`${o.name.trim()} : ${num3(used)} déjà utilisé(s) en production ou vendu(s), la quantité ne peut pas être inférieure`);
+          const delta = n(nl.qty) - n(o.qty);
+          if (o.lot_id) {
+            await t.q('UPDATE lots SET qty=qty+$1, initial_qty=$2, unit_cost=$3, supplier_id=$4, production_date=$5 WHERE id=$6', [delta, n(nl.qty), n(nl.unit_cost), b.supplier_id || null, date, o.lot_id]);
+            await t.q("UPDATE stock_movements SET qty=$1, unit_cost=$2 WHERE lot_id=$3 AND ref_type='purchases' AND ref_id=$4 AND type IN ('achat','entree')", [n(nl.qty), n(nl.unit_cost), o.lot_id, pur.id]);
+          }
+          await t.q('UPDATE purchase_items SET qty=$1, unit_cost=$2 WHERE id=$3', [n(nl.qty), n(nl.unit_cost), o.id]);
+        } else {
+          await removePurchaseLine(t, user, pur, o, used);
+        }
+      }
+      await t.q("DELETE FROM cash_transactions WHERE company_id=$1 AND ref_type='purchases' AND ref_id=$2", [user.cid, pur.id]);
+      pur = await t.one('UPDATE purchases SET date=$1, supplier_id=$2, account_id=$3, total=$4, note=$5, updated_at=now() WHERE id=$6 RETURNING *',
+        [date, b.supplier_id || null, b.account_id || null, total, b.note || null, pur.id]);
+    } else {
+      const number = await nextNumber(t, user.cid, 'achat', 'ACH');
+      pur = await t.one('INSERT INTO purchases (company_id,number,date,supplier_id,account_id,total,note,user_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *',
+        [user.cid, number, date, b.supplier_id || null, b.account_id || null, total, b.note || null, user.uid]);
+    }
+    const names = [];
     for (const l of lines) {
-      if (n(l.unit_cost) < 0) fail('Prix invalide');
-      await stockIn(t, user, { item_id: Number(l.item_id), qty: n(l.qty), unit_cost: n(l.unit_cost), supplier_id: b.supplier_id || null, warehouse_id: b.warehouse_id, type: 'achat', ref_type: 'achat_marche', note: b.note || 'Achat' });
-      total += n(l.qty) * n(l.unit_cost);
-      const it = await t.one('SELECT name FROM items WHERE id=$1', [l.item_id]); names.push(it?.name);
+      const it = await t.one('SELECT name FROM items WHERE id=$1 AND company_id=$2', [l.item_id, user.cid]);
+      if (!it) fail('Article introuvable');
+      names.push(String(it.name).trim());
+      if (l._kept) continue;
+      const lot = await stockIn(t, user, { item_id: Number(l.item_id), qty: n(l.qty), unit_cost: n(l.unit_cost), supplier_id: b.supplier_id || null, warehouse_id: b.warehouse_id, production_date: date, type: 'achat', ref_type: 'purchases', ref_id: pur.id, note: `${pur.number}${b.note ? ' — ' + b.note : ''}` });
+      await t.q('INSERT INTO purchase_items (purchase_id,item_id,qty,unit_cost,lot_id) VALUES ($1,$2,$3,$4,$5)', [pur.id, Number(l.item_id), n(l.qty), n(l.unit_cost), lot.id]);
     }
-    total = r2(total);
     if (b.account_id && total > 0) {
-      await cashTx(t, user, { account_id: b.account_id, amount: -total, category: 'Achat matières', label: `Achat : ${names.slice(0, 4).join(', ')}${names.length > 4 ? '…' : ''}`, ref_type: 'achat_marche', date: b.date });
+      await cashTx(t, user, { account_id: b.account_id, amount: -total, category: 'Achat matières', label: `${pur.number} : ${names.slice(0, 4).join(', ')}${names.length > 4 ? '…' : ''}`, ref_type: 'purchases', ref_id: pur.id, date });
     }
-    return { total, count: lines.length };
+    return { id: pur.id, number: pur.number, total, count: lines.length, edited: !!b.id };
+  }],
+  purchase_cancel: [['stock', 'achats'], async (t, user, b) => {
+    const pur = await t.one('SELECT * FROM purchases WHERE id=$1 AND company_id=$2 FOR UPDATE', [b.id, user.cid]);
+    if (!pur) fail('Achat introuvable');
+    if (pur.status !== 'ok') fail('Déjà annulé');
+    const old = await t.q('SELECT pl.*, i.name, l.qty AS lot_qty FROM purchase_items pl JOIN items i ON i.id=pl.item_id LEFT JOIN lots l ON l.id=pl.lot_id WHERE pl.purchase_id=$1', [pur.id]);
+    for (const o of old) await removePurchaseLine(t, user, pur, o, o.lot_id ? Math.max(0, n(o.qty) - n(o.lot_qty)) : 0, true);
+    await t.q("DELETE FROM cash_transactions WHERE company_id=$1 AND ref_type='purchases' AND ref_id=$2", [user.cid, pur.id]);
+    await t.q("UPDATE purchases SET status='annule', updated_at=now() WHERE id=$1", [pur.id]);
+    return { ok: true, number: pur.number };
   }],
   stock_out: ['stock', async (t, user, b) => stockOut(t, user, { ...b, type: b.type || 'sortie', ref_type: 'manuel' })],
   inventory: ['stock', async (t, user, b) => {

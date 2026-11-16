@@ -2,14 +2,15 @@ import { useState, useEffect } from 'react';
 import { op, crud, money, num, opts, today } from '../../lib/client';
 import { Tabs, run, confirmDo, invalidateRefs, RefSelect } from '../ui';
 import CrudTable from '../CrudTable';
-import { MarketPurchase } from './Stock';
+import { MarketPurchase, PurchaseHistory } from './Stock';
 import ActionModal from '../ActionModal';
 
 export default function Achats() {
-  const [tab, setTab] = useState('po');
+  const [tab, setTab] = useState('achats');
   return (
     <div>
-      <Tabs value={tab} onChange={setTab} tabs={[['po', 'Bons de commande'], ['suppliers', 'Fournisseurs'], ['pay', 'Paiements fournisseurs']]} />
+      <Tabs value={tab} onChange={setTab} tabs={[['achats', '🛒 Achats payés'], ['po', 'Bons de commande'], ['suppliers', 'Fournisseurs'], ['pay', 'Paiements fournisseurs']]} />
+      {tab === 'achats' && <PurchaseHistory />}
       {tab === 'po' && <Orders />}
       {tab === 'suppliers' && <Suppliers />}
       {tab === 'pay' && <SupplierPayments />}

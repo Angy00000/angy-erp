@@ -227,6 +227,23 @@ export default handler(async (req, res, user) => {
     return out;
   }
 
+  // Historique des achats payés (« Nouvel achat ») avec leurs articles
+  if (action === 'purchases') {
+    if (!c('stock') && !c('achats')) fail('Accès refusé', 403);
+    const from = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.from || '')) ? req.query.from : '2000-01-01';
+    const to = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.to || '')) ? req.query.to : '2999-12-31';
+    const list = await q(`SELECT p.*, s.name AS supplier_name, a.name AS account_name, u.name AS user_name FROM purchases p
+      LEFT JOIN suppliers s ON s.id=p.supplier_id LEFT JOIN accounts a ON a.id=p.account_id LEFT JOIN users u ON u.id=p.user_id
+      WHERE p.company_id=$1 AND p.date BETWEEN $2 AND $3 ORDER BY p.date DESC, p.id DESC LIMIT 300`, [cid, from, to]);
+    const ids = list.map((x) => x.id);
+    const lines = ids.length ? await q(`SELECT pl.*, i.name, i.unit, l.qty AS lot_qty, l.lot_number FROM purchase_items pl JOIN items i ON i.id=pl.item_id LEFT JOIN lots l ON l.id=pl.lot_id
+      WHERE pl.purchase_id = ANY($1::int[]) ORDER BY pl.id`, [ids]) : [];
+    for (const p of list) {
+      p.lines = lines.filter((l) => l.purchase_id === p.id).map((l) => ({ ...l, used: l.lot_id ? Math.max(0, Math.round((n(l.qty) - n(l.lot_qty)) * 1000) / 1000) : 0 }));
+    }
+    return list;
+  }
+
   // Le Gardien : alertes sur les actions sensibles (direction uniquement)
   if (action === 'guardian') {
     if (!c('gardien')) fail('Accès refusé pour votre rôle', 403);

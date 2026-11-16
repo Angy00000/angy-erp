@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import { op, money, num, opts, today, daysUntil, LABELS } from '../../lib/client';
-import { Tabs, Badge, invalidateRefs, Modal, useRefOptions, RefSelect, toast } from '../ui';
+import { api, op, money, num, opts, today, daysUntil, date as fdate, LABELS } from '../../lib/client';
+import { Tabs, Badge, invalidateRefs, Modal, useRefOptions, RefSelect, toast, useData, confirmDo } from '../ui';
 import CrudTable from '../CrudTable';
 import ActionModal from '../ActionModal';
 
@@ -15,8 +15,9 @@ export default function Stock() {
   const [tab, setTab] = useState('items');
   return (
     <div>
-      <Tabs value={tab} onChange={setTab} tabs={[['items', 'Articles & niveaux'], ['lots', 'Lots'], ['moves', 'Mouvements'], ['cats', 'Catégories'], ['wh', 'Entrepôts']]} />
+      <Tabs value={tab} onChange={setTab} tabs={[['items', 'Articles & niveaux'], ['achats', '🛒 Achats'], ['lots', 'Lots'], ['moves', 'Mouvements'], ['cats', 'Catégories'], ['wh', 'Entrepôts']]} />
       {tab === 'items' && <Items />}
+      {tab === 'achats' && <PurchaseHistory />}
       {tab === 'lots' && <Lots />}
       {tab === 'moves' && <Moves />}
       {tab === 'cats' && <CrudTable entity="categories" title="Catégorie" columns={[{ k: 'name', l: 'Nom' }, { k: 'kind', l: 'Type d\'articles', map: 'item_type' }]}
@@ -140,11 +141,11 @@ function Moves() {
 
 
 // Nouvel achat (marché, boutique, grossiste, fournisseur) : plusieurs articles en une fois, entrés en stock et payés depuis un compte.
-export function MarketPurchase({ onClose }) {
-  const items = useRefOptions('items', { active: true }).filter((i) => ['mp', 'emballage', 'consommable', 'materiel', 'semi_fini'].includes(i.type));
+export function MarketPurchase({ onClose, edit }) {
+  const items = useRefOptions('items', { active: true }).filter((i) => ['mp', 'emballage', 'consommable', 'materiel', 'semi_fini'].includes(i.type) || (edit && edit.lines.some((l) => l.item_id === i.id)));
   const accounts = useRefOptions('accounts', { active: true });
-  const [rows, setRows] = useState([{}, {}, {}]);
-  const [d, setD] = useState({ date: today() });
+  const [rows, setRows] = useState(() => (edit ? edit.lines.map((l) => ({ id: l.id, item_id: l.item_id, qty: String(Number(l.qty)), unit_cost: String(Number(l.unit_cost)), used: Number(l.used) || 0 })) : [{}, {}, {}]));
+  const [d, setD] = useState(() => (edit ? { id: edit.id, date: edit.date, account_id: edit.account_id || '', supplier_id: edit.supplier_id || '', note: edit.note || '' } : { date: today() }));
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
   const setRow = (i, x) => setRows((r) => r.map((y, j) => (j === i ? { ...y, ...x } : y)));
@@ -154,16 +155,18 @@ export function MarketPurchase({ onClose }) {
     setErr(null); setBusy(true);
     try {
       const r = await op('market_purchase', { ...d, account_id: acc || null, lines: rows.filter((x) => x.item_id && Number(x.qty) > 0) });
-      toast(`Achat enregistré : ${r.count} article(s), ${money(r.total)}${acc ? ' sortis de la caisse' : ''}`);
+      toast(r.edited ? `Achat ${r.number} modifié : stock et caisse corrigés (${money(r.total)})` : `Achat ${r.number} enregistré : ${r.count} article(s), ${money(r.total)}${acc ? ' sortis de la caisse' : ''} — retrouvez-le dans l'onglet 🛒 Achats`);
       onClose(true);
     } catch (e) { setErr(e.message); setBusy(false); }
   };
   const groups = { mp: 'Matières premières', emballage: 'Emballages', consommable: 'Consommables', materiel: 'Matériel', semi_fini: 'Semi-finis' };
   return (
-    <Modal wide title="🛒 Nouvel achat" onClose={() => onClose(false)}
-      footer={<><button className="btn" onClick={() => onClose(false)}>Annuler</button><button className="btn primary" disabled={busy || total <= 0} onClick={save}>{busy ? 'Enregistrement…' : `Enregistrer l'achat${total > 0 ? ' — ' + money(total) : ''}`}</button></>}>
+    <Modal wide title={edit ? `✏️ Modifier l'achat ${edit.number}` : '🛒 Nouvel achat'} onClose={() => onClose(false)}
+      footer={<><button className="btn" onClick={() => onClose(false)}>Fermer</button><button className="btn primary" disabled={busy || total <= 0} onClick={save}>{busy ? 'Enregistrement…' : `${edit ? 'Enregistrer les corrections' : 'Enregistrer l\'achat'}${total > 0 ? ' — ' + money(total) : ''}`}</button></>}>
       {err && <div className="err">{err}</div>}
-      <div className="note" style={{ marginBottom: 12 }}>Tout achat payé et reçu (marché, boutique, grossiste, fournisseur) : chaque article <b>entre dans le stock</b> et le total <b>sort de la caisse</b> choisie.</div>
+      {edit
+        ? <div className="note" style={{ marginBottom: 12 }}>Corrigez les quantités, les prix, la caisse ou la date : <b>le stock et la caisse sont corrigés automatiquement</b>. Ce qui a déjà été utilisé en production ne peut pas être retiré.</div>
+        : <div className="note" style={{ marginBottom: 12 }}>Tout achat payé et reçu (marché, boutique, grossiste, fournisseur) : chaque article <b>entre dans le stock</b> et le total <b>sort de la caisse</b> choisie.</div>}
       <div className="table-wrap"><table className="lines">
         <thead><tr><th style={{ minWidth: 230 }}>Article</th><th>En stock</th><th style={{ width: 110 }}>Quantité</th><th style={{ width: 130 }}>Prix par unité</th><th className="r">Total</th><th /></tr></thead>
         <tbody>{rows.map((r, i) => {
@@ -174,11 +177,11 @@ export function MarketPurchase({ onClose }) {
                 <option value="">— Choisir —</option>
                 {Object.entries(groups).map(([t, l]) => { const list = items.filter((x) => x.type === t); return list.length ? <optgroup key={t} label={l}>{list.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</optgroup> : null; })}
               </select></td>
-              <td className="small muted">{it ? `${num(it.stock)} ${it.unit || ''}` : ''}</td>
+              <td className="small muted">{it ? `${num(it.stock)} ${it.unit || ''}` : ''}{r.used > 0 && <><br /><span className="neg">{num(r.used)} déjà utilisé</span></>}</td>
               <td><input type="number" step="any" className="input" placeholder={it?.unit || ''} value={r.qty || ''} onChange={(e) => setRow(i, { qty: e.target.value })} disabled={!it} /></td>
               <td><input type="number" step="any" className="input" placeholder={it ? `F / ${it.unit || 'unité'}` : ''} value={r.unit_cost || ''} onChange={(e) => setRow(i, { unit_cost: e.target.value })} disabled={!it} /></td>
               <td className="r mono">{Number(r.qty) > 0 && Number(r.unit_cost) > 0 ? money(Number(r.qty) * Number(r.unit_cost)) : ''}</td>
-              <td>{rows.length > 1 && <button className="btn sm ghost" onClick={() => setRows(rows.filter((_, j) => j !== i))}>✕</button>}</td>
+              <td>{rows.length > 1 && !(r.used > 0) && <button className="btn sm ghost" onClick={() => setRows(rows.filter((_, j) => j !== i))}>✕</button>}</td>
             </tr>
           );
         })}</tbody>
@@ -194,5 +197,60 @@ export function MarketPurchase({ onClose }) {
         <div className="field"><label>Note</label><input className="input" placeholder="Ex. Marché Castor, boutique Ndiaye…" value={d.note || ''} onChange={(e) => setD({ ...d, note: e.target.value })} /></div>
       </div>
     </Modal>
+  );
+}
+
+// Historique des achats payés : voir, modifier, annuler
+export function PurchaseHistory() {
+  const [range, setRange] = useState({ from: today().slice(0, 8) + '01', to: today() });
+  const { data, reload } = useData(() => api(`app/purchases?from=${range.from}&to=${range.to}`), [range.from, range.to]);
+  const [modal, setModal] = useState(null);
+  const [open, setOpen] = useState({});
+  const [qs, setQs] = useState('');
+  const done = (ok) => { setModal(null); if (ok) { invalidateRefs('items'); invalidateRefs('accounts'); reload(); } };
+  const cancel = async (p) => {
+    if (!confirmDo(`Annuler l'achat ${p.number} ?\n\nLes articles sortent du stock et ${money(p.total)} reviennent dans ${p.account_name || 'la caisse'}.`)) return;
+    try { await op('purchase_cancel', { id: p.id }); toast(`Achat ${p.number} annulé`); done(true); } catch (e) { toast(e.message, 'error'); }
+  };
+  const list = (data || []).filter((p) => !qs || [p.number, p.note, p.supplier_name, ...p.lines.map((l) => l.name)].join(' ').toLowerCase().includes(qs.toLowerCase()));
+  const tot = list.filter((p) => p.status === 'ok').reduce((s, p) => s + Number(p.total), 0);
+  return (
+    <div>
+      <div className="row" style={{ gap: 10, flexWrap: 'wrap', marginBottom: 12, alignItems: 'flex-end' }}>
+        <button className="btn primary" onClick={() => setModal({ k: 'new' })}>🛒 Nouvel achat</button>
+        <input className="input" style={{ maxWidth: 220 }} placeholder="Rechercher (article, n°, note…)" value={qs} onChange={(e) => setQs(e.target.value)} />
+        <span style={{ flex: 1 }} />
+        <label className="small muted">Du <input type="date" className="input" value={range.from} onChange={(e) => setRange({ ...range, from: e.target.value })} /></label>
+        <label className="small muted">au <input type="date" className="input" value={range.to} onChange={(e) => setRange({ ...range, to: e.target.value })} /></label>
+      </div>
+      {!data && <div className="spinner">Chargement…</div>}
+      {data && !list.length && <div className="card empty">Aucun achat sur cette période. Cliquez <b>🛒 Nouvel achat</b> pour en enregistrer un.</div>}
+      {data && list.length > 0 && (
+        <div className="card"><div className="table-wrap"><table className="t">
+          <thead><tr><th>N°</th><th>Date</th><th>Articles</th><th>Payé avec</th><th className="r">Total</th><th /></tr></thead>
+          <tbody>{list.map((p) => [
+            <tr key={p.id} className={p.status === 'annule' ? 'muted' : ''}>
+              <td><b>{p.number}</b>{p.status === 'annule' && <><br /><span className="badge red">Annulé</span></>}</td>
+              <td>{fdate(p.date)}<br /><span className="small muted">{p.user_name || ''}</span></td>
+              <td><button className="link-btn" onClick={() => setOpen({ ...open, [p.id]: !open[p.id] })}>{p.lines.length} article(s) {open[p.id] ? '▲' : '▼'}</button>
+                <div className="small muted">{p.lines.slice(0, 3).map((l) => String(l.name).trim()).join(', ')}{p.lines.length > 3 ? '…' : ''}{p.note ? ` — ${p.note}` : ''}</div></td>
+              <td className="small">{p.account_name || <span className="muted">caisse non touchée</span>}{p.supplier_name ? <><br /><span className="muted">{p.supplier_name}</span></> : ''}</td>
+              <td className="r strong">{money(p.total)}</td>
+              <td className="actions">{p.status === 'ok' && <>
+                <button className="btn sm" onClick={() => setModal({ k: 'edit', p })}>✏️ Modifier</button>
+                <button className="btn sm danger" onClick={() => cancel(p)}>Annuler</button>
+              </>}</td>
+            </tr>,
+            open[p.id] && <tr key={p.id + 'l'} className="sub-row"><td colSpan={6}><table className="t small"><tbody>
+              {p.lines.map((l) => <tr key={l.id}><td>{String(l.name).trim()}</td><td className="r">{num(l.qty)} {l.unit || ''}</td><td className="r">× {money(l.unit_cost)}</td><td className="r strong">{money(Number(l.qty) * Number(l.unit_cost))}</td>
+                <td className="small muted">{l.used > 0 ? `${num(l.used)} déjà utilisé` : 'pas encore utilisé'}</td></tr>)}
+            </tbody></table></td></tr>,
+          ])}</tbody>
+          <tfoot><tr><td colSpan={4} className="strong">Total de la période</td><td className="r strong">{money(tot)}</td><td /></tr></tfoot>
+        </table></div></div>
+      )}
+      {modal?.k === 'new' && <MarketPurchase onClose={done} />}
+      {modal?.k === 'edit' && <MarketPurchase edit={modal.p} onClose={done} />}
+    </div>
   );
 }
