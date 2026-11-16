@@ -50,7 +50,7 @@ function Items() {
       <CrudTable entity="items" title="Article" csvName="articles" newLabel="Nouvel article"
         filters={[{ k: 'type', l: 'Type', opts: opts('item_type') }, { k: 'category_id', l: 'Catégorie', ref: 'categories' }]}
         toolbar={(reload) => <>
-          <button className="btn primary" onClick={() => setModal({ k: 'market', reload })}>🛒 Achat au marché</button>
+          <button className="btn primary" onClick={() => setModal({ k: 'market', reload })}>🛒 Nouvel achat</button>
           <button className="btn" onClick={() => setModal({ k: 'in', reload })}>⬇ Entrée stock</button>
           <button className="btn" onClick={() => setModal({ k: 'out', reload })}>⬆ Sortie / perte</button>
         </>}
@@ -139,7 +139,7 @@ function Moves() {
 }
 
 
-// Achat au marché : plusieurs articles en une fois, entrés en stock et payés depuis un compte.
+// Nouvel achat (marché, boutique, grossiste, fournisseur) : plusieurs articles en une fois, entrés en stock et payés depuis un compte.
 export function MarketPurchase({ onClose }) {
   const items = useRefOptions('items', { active: true }).filter((i) => ['mp', 'emballage', 'consommable', 'materiel', 'semi_fini'].includes(i.type));
   const accounts = useRefOptions('accounts', { active: true });
@@ -160,10 +160,10 @@ export function MarketPurchase({ onClose }) {
   };
   const groups = { mp: 'Matières premières', emballage: 'Emballages', consommable: 'Consommables', materiel: 'Matériel', semi_fini: 'Semi-finis' };
   return (
-    <Modal wide title="🛒 Achat au marché" onClose={() => onClose(false)}
+    <Modal wide title="🛒 Nouvel achat" onClose={() => onClose(false)}
       footer={<><button className="btn" onClick={() => onClose(false)}>Annuler</button><button className="btn primary" disabled={busy || total <= 0} onClick={save}>{busy ? 'Enregistrement…' : `Enregistrer l'achat${total > 0 ? ' — ' + money(total) : ''}`}</button></>}>
       {err && <div className="err">{err}</div>}
-      <div className="note" style={{ marginBottom: 12 }}>Tout ce que vous avez acheté et ramené : chaque article <b>entre dans le stock</b> et le total <b>sort de la caisse</b> choisie.</div>
+      <div className="note" style={{ marginBottom: 12 }}>Tout achat payé et reçu (marché, boutique, grossiste, fournisseur) : chaque article <b>entre dans le stock</b> et le total <b>sort de la caisse</b> choisie.</div>
       <div className="table-wrap"><table className="lines">
         <thead><tr><th style={{ minWidth: 230 }}>Article</th><th>En stock</th><th style={{ width: 110 }}>Quantité</th><th style={{ width: 130 }}>Prix par unité</th><th className="r">Total</th><th /></tr></thead>
         <tbody>{rows.map((r, i) => {
@@ -190,8 +190,8 @@ export function MarketPurchase({ onClose }) {
         <div className="field"><label>Payé avec</label><select className="input" value={acc} onChange={(e) => setD({ ...d, account_id: e.target.value ? Number(e.target.value) : '' })}>
           {accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}<option value="">Ne pas toucher à la caisse (déjà payé)</option></select></div>
         <div className="field"><label>Date</label><input type="date" className="input" value={d.date} onChange={(e) => setD({ ...d, date: e.target.value })} /></div>
-        <div className="field"><label>Fournisseur (facultatif)</label><RefSelect f={{ ref: 'suppliers', placeholder: 'Marché / divers', quickCreate: { label: 'fournisseur', fields: ['name', 'phone'] } }} value={d.supplier_id} onChange={(v) => setD({ ...d, supplier_id: v })} /></div>
-        <div className="field"><label>Note</label><input className="input" placeholder="Ex. Marché Castor" value={d.note || ''} onChange={(e) => setD({ ...d, note: e.target.value })} /></div>
+        <div className="field"><label>Fournisseur (facultatif)</label><RefSelect f={{ ref: 'suppliers', placeholder: 'Sans fournisseur / divers', quickCreate: { label: 'fournisseur', fields: ['name', 'phone'] } }} value={d.supplier_id} onChange={(v) => setD({ ...d, supplier_id: v })} /></div>
+        <div className="field"><label>Note</label><input className="input" placeholder="Ex. Marché Castor, boutique Ndiaye…" value={d.note || ''} onChange={(e) => setD({ ...d, note: e.target.value })} /></div>
       </div>
     </Modal>
   );

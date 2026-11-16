@@ -75,20 +75,20 @@ const OPS = {
     }
     return lot;
   }],
-  // Achat au marché : plusieurs articles d'un coup, entrés en stock et payés en une fois
+  // Nouvel achat (marché, boutique, grossiste…) : plusieurs articles d'un coup, entrés en stock et payés en une fois
   market_purchase: [['stock', 'achats'], async (t, user, b) => {
     const lines = (b.lines || []).filter((l) => Number(l.item_id) && n(l.qty) > 0);
     if (!lines.length) fail('Ajoutez au moins un article avec une quantité');
     let total = 0; const names = [];
     for (const l of lines) {
       if (n(l.unit_cost) < 0) fail('Prix invalide');
-      await stockIn(t, user, { item_id: Number(l.item_id), qty: n(l.qty), unit_cost: n(l.unit_cost), supplier_id: b.supplier_id || null, warehouse_id: b.warehouse_id, type: 'achat', ref_type: 'achat_marche', note: b.note || 'Achat au marché' });
+      await stockIn(t, user, { item_id: Number(l.item_id), qty: n(l.qty), unit_cost: n(l.unit_cost), supplier_id: b.supplier_id || null, warehouse_id: b.warehouse_id, type: 'achat', ref_type: 'achat_marche', note: b.note || 'Achat' });
       total += n(l.qty) * n(l.unit_cost);
       const it = await t.one('SELECT name FROM items WHERE id=$1', [l.item_id]); names.push(it?.name);
     }
     total = r2(total);
     if (b.account_id && total > 0) {
-      await cashTx(t, user, { account_id: b.account_id, amount: -total, category: 'Achat matières', label: `Achat au marché : ${names.slice(0, 4).join(', ')}${names.length > 4 ? '…' : ''}`, ref_type: 'achat_marche', date: b.date });
+      await cashTx(t, user, { account_id: b.account_id, amount: -total, category: 'Achat matières', label: `Achat : ${names.slice(0, 4).join(', ')}${names.length > 4 ? '…' : ''}`, ref_type: 'achat_marche', date: b.date });
     }
     return { total, count: lines.length };
   }],

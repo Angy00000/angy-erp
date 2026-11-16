@@ -23,9 +23,9 @@ function Orders() {
   return (
     <>
       {modal?.k === 'market' && <MarketPurchase onClose={(ok) => { const r = modal.reload; setModal(null); if (ok) { invalidateRefs('items'); invalidateRefs('accounts'); r(); } }} />}
-      <div className="note" style={{ marginBottom: 12 }}>Achat payé et ramené le jour même (marché) ? Utilisez <b>🛒 Achat au marché</b> : le stock et la caisse sont mis à jour tout de suite. Le bon de commande sert quand un fournisseur livre plus tard (il faudra ensuite <b>Réceptionner</b>).</div>
+      <div className="note" style={{ marginBottom: 12 }}>Achat payé et reçu tout de suite (marché, boutique, grossiste, fournisseur) ? Utilisez <b>🛒 Nouvel achat</b> : le stock et la caisse sont mis à jour tout de suite. Le bon de commande sert seulement quand un fournisseur livre plus tard (il faudra ensuite <b>Réceptionner</b>).</div>
       <CrudTable entity="purchase_orders" title="Bon de commande fournisseur" csvName="commandes-fournisseurs" dateRange newLabel="Nouvelle commande"
-        toolbar={(reload) => <button className="btn primary" onClick={() => setModal({ k: 'market', reload })}>🛒 Achat au marché</button>}
+        toolbar={(reload) => <button className="btn primary" onClick={() => setModal({ k: 'market', reload })}>🛒 Nouvel achat</button>}
         initialRange={{ from: today().slice(0, 5) + '01-01', to: today() }}
         filters={[{ k: 'status', l: 'Statut', opts: opts('po_status') }, { k: 'supplier_id', l: 'Fournisseur', ref: 'suppliers' }]}
         columns={[
