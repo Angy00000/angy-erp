@@ -83,7 +83,7 @@ function Expenses() {
         { k: 'label', l: 'Libellé', req: true, full: true }, { k: 'amount', l: 'Montant', t: 'number', req: true },
         { k: 'category', l: 'Catégorie', t: 'select', opts: EXPENSE_CATS.map((c) => [c, c]) }, { k: 'date', l: 'Date', t: 'date', req: true },
         { k: 'account_id', l: 'Payé via (compte)', t: 'ref', ref: 'accounts', help: 'Le compte sera débité automatiquement' },
-        { k: 'supplier_id', l: 'Fournisseur', t: 'ref', ref: 'suppliers' },
+        { k: 'supplier_id', l: 'Fournisseur', t: 'ref', ref: 'suppliers', quickCreate: { label: 'fournisseur', fields: ['name', 'phone'] } },
         { k: 'production_id', l: 'Rattacher à une production (optionnel)', t: 'ref', ref: 'production_orders', label: (r) => `${r.number} — ${r.product_name || ''}${r.lot_number ? ' · lot ' + r.lot_number : ''}`, help: 'La dépense sera ajoutée au coût de cette production' },
         { k: 'reference', l: 'Référence / n° pièce' },
       ]}

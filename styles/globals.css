@@ -771,3 +771,5 @@ table.t { width: 100%; border-collapse: collapse; }
   .lp-hide-m { display: none !important; }
 }
 .pr-final .lp-btn.ghost { color: #17221d; border-color: #17221d33; background: #fff; }
+.quick-new { display: flex; gap: 6px; margin-top: 6px; align-items: center; flex-wrap: wrap; padding: 8px; border: 1px dashed var(--line, #ddd); border-radius: 10px; background: var(--bg2, #faf9f5); }
+.quick-new .input { flex: 1; min-width: 140px; height: 36px; }

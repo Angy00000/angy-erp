@@ -34,7 +34,7 @@ function Orders() {
         defaults={() => ({ date: today() })}
         canEdit={(r) => ['brouillon', 'envoye'].includes(r.status)} canDelete={(r) => r.status === 'brouillon'}
         fields={[
-          { k: 'supplier_id', l: 'Fournisseur', t: 'ref', ref: 'suppliers', req: true }, { k: 'date', l: 'Date', t: 'date', req: true },
+          { k: 'supplier_id', l: 'Fournisseur', t: 'ref', ref: 'suppliers', placeholder: 'Fournisseur divers (marché)', quickCreate: { label: 'fournisseur', fields: ['name', 'phone'] } }, { k: 'date', l: 'Date', t: 'date', req: true },
           { k: 'expected_date', l: 'Livraison prévue', t: 'date' }, { k: 'notes', l: 'Notes / conditions', t: 'textarea', full: true },
         ]}
         lines={{ title: 'Articles commandés', itemParams: { active: true }, fields: [{ k: 'qty', l: 'Qté' }, { k: 'unit_price', l: 'Prix unitaire', w: 130 }], onItem: (it) => ({ unit_price: it.purchase_price || it.cost_price, qty: 1 }) }}

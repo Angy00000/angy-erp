@@ -26,7 +26,7 @@ const STOCK_IN_FIELDS = [
   { k: 'item_id', l: 'Article', t: 'ref', ref: 'items', params: { active: true }, req: true, full: true, label: (r) => `${r.name} (${r.unit || ''})` },
   { k: 'qty', l: 'Quantité', t: 'number', req: true }, { k: 'unit_cost', l: 'Coût unitaire', t: 'number', help: 'Vide = coût moyen actuel' },
   { k: 'lot_number', l: 'N° de lot', ph: 'Automatique si vide' }, { k: 'expiry_date', l: 'Date limite (DLC/DLUO)', t: 'date', help: 'Vide = calculée selon la durée de vie' },
-  { k: 'warehouse_id', l: 'Entrepôt', t: 'ref', ref: 'warehouses' }, { k: 'supplier_id', l: 'Fournisseur', t: 'ref', ref: 'suppliers' },
+  { k: 'warehouse_id', l: 'Entrepôt', t: 'ref', ref: 'warehouses' }, { k: 'supplier_id', l: 'Fournisseur', t: 'ref', ref: 'suppliers', quickCreate: { label: 'fournisseur', fields: ['name', 'phone'] } },
   { k: 'note', l: 'Note', full: true },
 ];
 const STOCK_OUT_FIELDS = [

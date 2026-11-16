@@ -165,13 +165,38 @@ export function Field({ f, value, onChange, data }) {
 
 export function RefSelect({ id, f, value, onChange, data }) {
   const params = typeof f.params === 'function' ? f.params(data || {}) : f.params;
-  const rows = useRefOptions(f.ref, params);
+  const base = useRefOptions(f.ref, params);
+  const [extra, setExtra] = useState(null);
+  const rows = extra && !base.some((r) => r.id === extra.id) ? [...base, extra] : base;
   const label = f.label || ((r) => r.name || r.number || r.lot_number || r.id);
+  const [adding, setAdding] = useState(false);
+  const [nv, setNv] = useState({});
+  const [busy, setBusy] = useState(false);
+  // Création rapide (ex. nouveau fournisseur) sans quitter le formulaire
+  const create = async () => {
+    if (!nv.name?.trim()) return toast('Indiquez le nom', 'error');
+    setBusy(true);
+    try {
+      const r = await crud.create(f.ref, { name: nv.name.trim(), phone: nv.phone || null });
+      setExtra(r); invalidateRefs(f.ref); onChange(r.id, r); setAdding(false); setNv({}); toast(`${f.quickCreate.label[0].toUpperCase() + f.quickCreate.label.slice(1)} ajouté`);
+    } catch (e) { toast(e.message, 'error'); } finally { setBusy(false); }
+  };
   return (
-    <select id={id} className="input" value={value ?? ''} onChange={(e) => onChange(e.target.value ? Number(e.target.value) : '', rows.find((r) => r.id === Number(e.target.value)))}>
-      <option value="">{f.placeholder || '— Choisir —'}</option>
-      {rows.map((r) => <option key={r.id} value={r.id}>{label(r)}</option>)}
-    </select>
+    <>
+      <select id={id} className="input" value={value ?? ''} onChange={(e) => { if (e.target.value === '__new') { setAdding(true); return; } onChange(e.target.value ? Number(e.target.value) : '', rows.find((r) => r.id === Number(e.target.value))); }}>
+        <option value="">{f.placeholder || '— Choisir —'}</option>
+        {rows.map((r) => <option key={r.id} value={r.id}>{label(r)}</option>)}
+        {f.quickCreate && <option value="__new">+ Nouveau {f.quickCreate.label}…</option>}
+      </select>
+      {adding && (
+        <div className="quick-new">
+          <input className="input" autoFocus placeholder={`Nom du ${f.quickCreate.label}`} value={nv.name || ''} onChange={(e) => setNv({ ...nv, name: e.target.value })} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); create(); } }} />
+          {f.quickCreate.fields?.includes('phone') && <input className="input" placeholder="Téléphone" value={nv.phone || ''} onChange={(e) => setNv({ ...nv, phone: e.target.value })} />}
+          <button type="button" className="btn sm primary" disabled={busy} onClick={create}>Ajouter</button>
+          <button type="button" className="btn sm ghost" onClick={() => { setAdding(false); setNv({}); }}>✕</button>
+        </div>
+      )}
+    </>
   );
 }
 
