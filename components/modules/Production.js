@@ -58,7 +58,7 @@ function Orders() {
       {modal?.k === 'check' && <CheckModal row={modal.row} onClose={() => setModal(null)} />}
       {modal?.k === 'done' && <CompleteModal row={modal.row} onClose={(ok) => { const row = modal.row; close(modal.reload)(ok); if (ok) setModal({ k: 'detail', row }); }} />}
       {modal?.k === 'detail' && <ProdDetail id={modal.row.id} onClose={() => setModal(null)} />}
-      {modal?.k === 'quick' && <QuickProd onClose={(res) => { const rl = modal.reload; setModal(res ? { k: 'detail', row: { id: res.id } } : null); if (res) { invalidateRefs('items'); invalidateRefs('lots'); rl(); } }} />}
+      {modal?.k === 'quick' && <QuickProd onClose={(res) => { const rl = modal.reload; setModal(res && res.orders?.length === 1 ? { k: 'detail', row: { id: res.id } } : null); if (res) { invalidateRefs('items'); invalidateRefs('lots'); rl(); } }} />}
     </>
   );
 }
@@ -328,49 +328,83 @@ function ProdDetail({ id, onClose }) {
 function QuickProd({ onClose }) {
   const products = useRefOptions('items', { type: 'pf', active: true });
   const [d, setD] = useState({ date: today() });
+  const [rows, setRows] = useState([{}]);
   const [err, setErr] = useState(null);
   const [busy, setBusy] = useState(false);
-  const p = products.find((x) => x.id === Number(d.product_id));
-  const uv = Number(p?.unit_volume) || 0;
-  const qty = Number(d.qty) || (uv && Number(d.volume_l) ? Math.round((Number(d.volume_l) / uv) * 1000) / 1000 : 0);
-  const total = (Number(d.expense_cost) || 0) + (Number(d.labor_cost) || 0);
-  const liters = Number(d.volume_l) || (uv ? qty * uv : 0);
   const set = (k) => (e) => setD((x) => ({ ...x, [k]: e.target.value }));
+  const setRow = (i, patch) => setRows((r) => r.map((x, j) => (j === i ? { ...x, ...patch } : x)));
+  const calc = rows.map((r) => {
+    const p = products.find((x) => x.id === Number(r.product_id));
+    const uv = Number(p?.unit_volume) || 0;
+    const qty = uv ? (Number(r.volume_l) ? Math.round((Number(r.volume_l) / uv) * 1000) / 1000 : 0) : Number(r.qty) || 0;
+    return { p, uv, qty, liters: uv ? qty * uv : 0 };
+  });
+  const valid = calc.filter((c) => c.p && c.qty > 0);
+  const total = (Number(d.expense_cost) || 0) + (Number(d.labor_cost) || 0);
+  const totalL = valid.reduce((s, c) => s + c.liters, 0);
+  const byLiters = valid.length > 0 && valid.every((c) => c.liters > 0);
+  const totalQ = valid.reduce((s, c) => s + c.qty, 0);
+  const share = (c) => (byLiters ? c.liters / totalL : c.qty / (totalQ || 1));
+  // Proposer le même jus dans un autre format (ex. sachet → bouteille)
+  const base = (name) => (name || '').replace(/\s*\(.*\)\s*$/, '').trim().toLowerCase();
+  const suggest = () => {
+    const first = valid[0]?.p;
+    const used = rows.map((r) => Number(r.product_id));
+    const other = first && products.find((x) => !used.includes(x.id) && base(x.name) === base(first.name));
+    setRows((r) => [...r, other ? { product_id: other.id } : {}]);
+  };
   const submit = async () => {
     setErr(null); setBusy(true);
     try {
-      const r = await op('prod_simple', d);
-      toast(`Production ${r.number} enregistrée`);
+      const r = await op('prod_simple', { ...d, lines: rows.filter((x) => x.product_id) });
+      toast(`Production enregistrée : ${r.number}`);
       onClose(r);
     } catch (e) { setErr(e.message); } finally { setBusy(false); }
   };
   return (
-    <Modal title="⚡ Production rapide" onClose={() => onClose(null)}
+    <Modal wide title="⚡ Production rapide" onClose={() => onClose(null)}
       footer={<><button className="btn" onClick={() => onClose(null)}>Annuler</button><button className="btn primary" disabled={busy} onClick={submit}>{busy ? 'Enregistrement…' : 'Enregistrer la production'}</button></>}>
       {err && <div className="err">{err}</div>}
+      <h3 style={{ fontSize: 14, margin: '0 0 8px' }}>Ce qui a été produit</h3>
+      <div className="muted small" style={{ marginBottom: 8 }}>Une ligne par format. Ex. : Bissap en sachets <b>et</b> Bissap en bouteilles de 1 L. Les dépenses sont réparties selon les litres.</div>
+      <div className="table-wrap"><table className="lines">
+        <thead><tr><th style={{ minWidth: 240 }}>Produit / format</th><th>Litres ou quantité</th><th>Obtenu</th>{total > 0 && <th className="r">Coût / unité</th>}{total > 0 && <th className="r">Marge / unité</th>}<th /></tr></thead>
+        <tbody>{rows.map((r, i) => {
+          const c = calc[i];
+          const unitCost = total > 0 && c.qty > 0 && valid.includes(c) ? (total * share(c)) / c.qty : null;
+          return (
+            <tr key={i}>
+              <td><select className="input" value={r.product_id || ''} onChange={(e) => setRow(i, { product_id: e.target.value ? Number(e.target.value) : '', volume_l: '', qty: '' })}>
+                <option value="">— Choisir —</option>{products.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
+              </select></td>
+              <td style={{ width: 170 }}>{c.uv > 0
+                ? <input type="number" step="any" className="input" placeholder="Litres" value={r.volume_l || ''} onChange={(e) => setRow(i, { volume_l: e.target.value })} />
+                : <input type="number" step="any" className="input" placeholder={c.p ? c.p.unit : 'Quantité'} value={r.qty || ''} onChange={(e) => setRow(i, { qty: e.target.value })} disabled={!c.p} />}</td>
+              <td className="strong" style={{ whiteSpace: 'nowrap' }}>{c.qty > 0 ? `${num(c.qty)} ${c.p.unit}${c.liters ? ` · ${num(c.liters)} L` : ''}` : <span className="muted">—</span>}</td>
+              {total > 0 && <td className="r mono">{unitCost != null ? money(unitCost) : ''}</td>}
+              {total > 0 && <td className="r mono">{unitCost != null && Number(c.p.sale_price) > 0 ? <span className={c.p.sale_price - unitCost < 0 ? 'neg strong' : 'pos strong'}>{money(c.p.sale_price - unitCost)}</span> : ''}</td>}
+              <td>{rows.length > 1 && <button className="btn sm ghost" onClick={() => setRows((x) => x.filter((_, j) => j !== i))}>✕</button>}</td>
+            </tr>
+          );
+        })}</tbody>
+      </table></div>
+      <button className="btn sm" style={{ marginTop: 8 }} onClick={suggest}>+ Ajouter un autre format (bouteille, sachet…)</button>
+
+      <h3 style={{ fontSize: 14, margin: '18px 0 8px' }}>Ce que la production a coûté</h3>
       <div className="form">
-        <div className="field full"><label>Produit fabriqué <span className="req">*</span></label>
-          <select className="input" value={d.product_id || ''} onChange={(e) => setD((x) => ({ ...x, product_id: e.target.value ? Number(e.target.value) : '' }))}>
-            <option value="">— Choisir —</option>{products.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
-          </select>
-          {p && !uv && <div className="muted small" style={{ marginTop: 4 }}>Astuce : indiquez la contenance (ex. 0,125 L) dans la fiche article pour saisir en litres.</div>}
-        </div>
-        <div className="field"><label>Date de production</label><input type="date" className="input" value={d.date} onChange={set('date')} /></div>
-        {uv > 0
-          ? <div className="field"><label>Volume produit (litres) <span className="req">*</span></label><input type="number" step="any" className="input" value={d.volume_l || ''} onChange={set('volume_l')} placeholder="Ex. 18,625" /></div>
-          : <div className="field"><label>Quantité produite ({p?.unit || 'unités'}) <span className="req">*</span></label><input type="number" step="any" className="input" value={d.qty || ''} onChange={set('qty')} /></div>}
-        <div className="field"><label>Dépenses de production (FCFA) <span className="req">*</span></label><input type="number" step="any" className="input" value={d.expense_cost || ''} onChange={set('expense_cost')} placeholder="Ingrédients, sucre, sachets, gaz…" /></div>
+        <div className="field"><label>Dépenses de production (FCFA) <span className="req">*</span></label><input type="number" step="any" className="input" value={d.expense_cost || ''} onChange={set('expense_cost')} placeholder="Ingrédients, sucre, sachets, bouteilles, gaz…" /></div>
         <div className="field"><label>Main-d'œuvre (optionnel)</label><input type="number" step="any" className="input" value={d.labor_cost || ''} onChange={set('labor_cost')} /></div>
+        <div className="field"><label>Date de production</label><input type="date" className="input" value={d.date} onChange={set('date')} /></div>
         <div className="field"><label>Dépenses payées depuis (optionnel)</label><RefSelect f={{ ref: 'accounts', params: { active: true }, placeholder: 'Ne pas toucher à la caisse' }} value={d.account_id} onChange={(v) => setD((x) => ({ ...x, account_id: v }))} /></div>
         <div className="field"><label>N° de lot (optionnel)</label><input className="input" value={d.lot_number || ''} onChange={set('lot_number')} placeholder="Automatique" /></div>
         <div className="field"><label>Date limite (DLC)</label><input type="date" className="input" value={d.expiry_date || ''} onChange={set('expiry_date')} /></div>
         <div className="field full"><label>Note</label><input className="input" value={d.notes || ''} onChange={set('notes')} /></div>
       </div>
-      {p && qty > 0 && total > 0 && (
+      {valid.length > 0 && total > 0 && (
         <div className="grid g3" style={{ marginTop: 16 }}>
-          <Stat k="Quantité obtenue" v={`${num(qty)} ${p.unit}`} s={liters ? `${num(liters)} L` : ''} />
-          <Stat k="Coût par litre" v={liters ? money(total / liters) : '—'} />
-          <Stat accent k={`Coût par ${p.unit}`} v={money(total / qty)} s={Number(p.sale_price) > 0 ? `Vendu ${money(p.sale_price)} → marge ${money(p.sale_price - total / qty)}` : 'Prix de vente non renseigné'} />
+          <Stat k="Volume total" v={totalL ? `${num(totalL)} L` : `${num(totalQ)} unités`} s={valid.map((c) => `${num(c.qty)} ${c.p.unit}`).join(' + ')} />
+          <Stat k="Coût par litre" v={totalL ? money(total / totalL) : '—'} />
+          <Stat accent k="Ventes prévues" v={money(valid.reduce((s, c) => s + c.qty * (Number(c.p.sale_price) || 0), 0))} s={`Bénéfice prévu : ${money(valid.reduce((s, c) => s + c.qty * (Number(c.p.sale_price) || 0), 0) - total)}`} />
         </div>
       )}
     </Modal>

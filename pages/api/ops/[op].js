@@ -205,30 +205,44 @@ const OPS = {
     return { lot_number: lot.lot_number, unit_cost: unit, total_cost: total };
   }],
 
-  // Production rapide : produit + volume (ou quantité) + dépenses totales → OF terminé, lot créé, coût par unité
+  // Production rapide : un jus produit en un ou plusieurs formats (sachets, bouteilles…) + dépenses totales.
+  // Les dépenses sont réparties entre les formats au prorata des litres ; un OF terminé et un lot par format.
   prod_simple: ['production', async (t, user, b) => {
-    const item = await t.one('SELECT * FROM items WHERE id=$1 AND company_id=$2', [b.product_id, user.cid]);
-    if (!item) fail('Choisissez le produit fabriqué');
-    const uv = n(item.unit_volume);
-    const vol = n(b.volume_l);
-    let qty = n(b.qty);
-    if (!qty && vol && uv) qty = Math.round((vol / uv) * 1000) / 1000;
-    if (qty <= 0) fail(uv ? 'Indiquez le volume produit (litres) ou la quantité' : 'Indiquez la quantité produite');
+    const raw = Array.isArray(b.lines) && b.lines.length ? b.lines : [{ product_id: b.product_id, volume_l: b.volume_l, qty: b.qty }];
+    const lines = [];
+    for (const l of raw) {
+      if (!l.product_id) continue;
+      const item = await t.one('SELECT * FROM items WHERE id=$1 AND company_id=$2', [l.product_id, user.cid]);
+      if (!item) fail('Produit introuvable');
+      const uv = n(item.unit_volume);
+      let qty = n(l.qty);
+      if (!qty && n(l.volume_l) && uv) qty = Math.round((n(l.volume_l) / uv) * 1000) / 1000;
+      if (qty <= 0) continue;
+      lines.push({ item, qty, liters: uv ? qty * uv : 0 });
+    }
+    if (!lines.length) fail('Indiquez au moins un produit avec le volume ou la quantité produite');
     const expense = n(b.expense_cost), labor = n(b.labor_cost);
     if (expense + labor <= 0) fail('Indiquez les dépenses de production');
-    const total = expense + labor;
-    const unit = total / qty;
+    const totalL = lines.reduce((s, l) => s + l.liters, 0);
+    const totalQ = lines.reduce((s, l) => s + l.qty, 0);
     const date = b.date || today();
-    const number = await nextNumber(t, user.cid, 'OF', 'OF');
-    const po = await t.one(`INSERT INTO production_orders (company_id,number,product_id,planned_qty,produced_qty,status,planned_date,started_at,finished_at,
-        material_cost,labor_cost,overhead_cost,expense_cost,total_cost,unit_cost,volume_l,team,notes,user_id)
-      VALUES ($1,$2,$3,$4,$4,'termine',$5::date,$5::date,$5::date,0,$6,0,$7,$8,$9,$10,$11,$12,$13) RETURNING *`,
-      [user.cid, number, item.id, qty, date, r2(labor), r2(expense), r2(total), unit, vol || (uv ? qty * uv : null), b.team || null, b.notes || null, user.uid]);
-    const lot = await stockIn(t, user, { item_id: item.id, qty, unit_cost: unit, lot_number: b.lot_number, expiry_date: b.expiry_date, production_date: date,
-      warehouse_id: b.warehouse_id, type: 'production', ref_type: 'production_orders', ref_id: po.id, note: number });
-    await t.q('UPDATE production_orders SET lot_id=$1, lot_number=$2, expiry_date=$3 WHERE id=$4', [lot.id, lot.lot_number, lot.expiry_date, po.id]);
-    if (b.account_id && expense > 0) await cashTx(t, user, { account_id: b.account_id, amount: -expense, category: 'Production', label: `Dépenses ${number} — ${item.name}`, ref_type: 'production_orders', ref_id: po.id, date });
-    return { id: po.id, number, qty, unit_cost: unit, lot_number: lot.lot_number };
+    const out = [];
+    for (const l of lines) {
+      const share = totalL > 0 && lines.every((x) => x.liters > 0) ? l.liters / totalL : l.qty / totalQ;
+      const exp = expense * share, lab = labor * share, total = exp + lab, unit = total / l.qty;
+      const number = await nextNumber(t, user.cid, 'OF', 'OF');
+      const po = await t.one(`INSERT INTO production_orders (company_id,number,product_id,planned_qty,produced_qty,status,planned_date,started_at,finished_at,
+          material_cost,labor_cost,overhead_cost,expense_cost,total_cost,unit_cost,volume_l,team,notes,user_id)
+        VALUES ($1,$2,$3,$4,$4,'termine',$5::date,$5::date,$5::date,0,$6,0,$7,$8,$9,$10,$11,$12,$13) RETURNING *`,
+        [user.cid, number, l.item.id, l.qty, date, r2(lab), r2(exp), r2(total), unit, l.liters || null, b.team || null,
+          [b.notes, lines.length > 1 ? `Production de ${Math.round(totalL * 1000) / 1000} L répartie en ${lines.length} formats` : null].filter(Boolean).join(' · ') || null, user.uid]);
+      const lot = await stockIn(t, user, { item_id: l.item.id, qty: l.qty, unit_cost: unit, lot_number: b.lot_number ? `${b.lot_number}${lines.length > 1 ? '-' + (l.item.code || l.item.id) : ''}` : undefined,
+        expiry_date: b.expiry_date, production_date: date, warehouse_id: b.warehouse_id, type: 'production', ref_type: 'production_orders', ref_id: po.id, note: number });
+      await t.q('UPDATE production_orders SET lot_id=$1, lot_number=$2, expiry_date=$3 WHERE id=$4', [lot.id, lot.lot_number, lot.expiry_date, po.id]);
+      out.push({ id: po.id, number, product: l.item.name, qty: l.qty, unit_cost: unit, lot_number: lot.lot_number });
+    }
+    if (b.account_id && expense > 0) await cashTx(t, user, { account_id: b.account_id, amount: -expense, category: 'Production', label: `Dépenses production ${out.map((o) => o.number).join(', ')}`, ref_type: 'production_orders', ref_id: out[0].id, date });
+    return { id: out[0].id, number: out.map((o) => o.number).join(', '), orders: out };
   }],
 
   // ---------- VENTES ----------
