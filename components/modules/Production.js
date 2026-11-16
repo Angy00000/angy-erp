@@ -547,7 +547,7 @@ export function QuickProd({ onClose, initial, note, edit }) {
       {edit && <div className="note" style={{ marginBottom: 12 }}>Corrigez ce qui est faux : litres, formats, ce qui a été pris dans le magasin, dépenses, date. <b>Le stock, la caisse, le coût par unité et le bénéfice sont recalculés automatiquement.</b> On ne peut pas descendre en dessous de ce qui a déjà été vendu.</div>}
       {note && <div className="note" style={{ marginBottom: 12 }}>{note}</div>}
       <h3 style={{ fontSize: 14, margin: '0 0 8px' }}>Ce qui a été produit</h3>
-      <div className="muted small" style={{ marginBottom: 10 }}>Choisissez le jus, puis tapez <b>le nombre de sachets ou de bouteilles obtenus</b> pour chaque format. Laissez vide les formats que vous n'avez pas faits. Tout le reste se calcule.</div>
+      <div className="muted small" style={{ marginBottom: 10 }}>Choisissez le jus, puis tapez pour chaque format <b>le nombre de sachets ou de bouteilles obtenus</b>, ou <b>les litres</b> : l'un calcule l'autre. Laissez vide les formats que vous n'avez pas faits. Tout le reste se calcule.</div>
       {fams.map((fam, k) => {
         const g = famList.find((x) => x.name === fam);
         const famRows = g ? g.items.map((it) => ({ it, i: rows.findIndex((r) => Number(r.product_id) === it.id) })) : [];
@@ -573,9 +573,12 @@ export function QuickProd({ onClose, initial, note, edit }) {
                 return (
                   <div key={it.id} className={'pq-fmt' + (c.qty > 0 ? ' on' : '')}>
                     <div className="pq-name"><b>{fmt.charAt(0).toUpperCase() + fmt.slice(1)}</b><span>{money(it.sale_price)} l'unité</span></div>
-                    <label className="pq-in"><input type="number" min="0" step="1" className="input" placeholder="0" value={val} onChange={(e) => setN(e.target.value)} /><span>{it.unit}s</span></label>
+                    <div className="pq-pair">
+                      <label className="pq-in"><input type="number" min="0" step="1" className="input" placeholder="0" value={val} onChange={(e) => setN(e.target.value)} /><span>{it.unit}s</span></label>
+                      {c.uv > 0 && <><span className="pq-eq">=</span><label className="pq-in pq-l"><input type="number" min="0" step="any" className="input" placeholder="0" value={r.volume_l || ''} onChange={(e) => setRow(i, { volume_l: e.target.value, qty_in: undefined })} /><span>L</span></label></>}
+                    </div>
                     <div className="pq-res">
-                      {c.qty > 0 ? <>{c.liters > 0 && <b>= {num(c.liters)} L</b>}{unitCost != null && <span>coût {money(unitCost)} · <em className={Number(it.sale_price) - unitCost < 0 ? 'neg' : 'pos'}>marge {money(Number(it.sale_price) - unitCost)}</em></span>}</> : <span className="muted">pas produit</span>}
+                      {c.qty > 0 ? <>{c.uv > 0 && <b>{num(c.qty)} {it.unit}{c.qty > 1 ? 's' : ''} · {num(c.liters)} L</b>}{unitCost != null && <span>coût {money(unitCost)} · <em className={Number(it.sale_price) - unitCost < 0 ? 'neg' : 'pos'}>marge {money(Number(it.sale_price) - unitCost)}</em></span>}</> : <span className="muted">pas produit</span>}
                       {r.sold > 0 && <span className={c.qty + 1e-9 < r.sold ? 'neg strong' : 'muted'}>{num(r.sold)} déjà vendu(s)</span>}
                     </div>
                   </div>
