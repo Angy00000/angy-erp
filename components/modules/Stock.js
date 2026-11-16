@@ -67,7 +67,7 @@ function Items() {
         ]}
         defaults={{ type: 'pf', unit: 'unité', active: true }}
         fields={[
-          { k: 'name', l: 'Désignation', req: true }, { k: 'code', l: 'Code / référence' },
+          { k: 'name', l: 'Nom de l\'article', req: true, ph: 'Ex. Jus de bissap (bouteille 25 cl) · Sucre en poudre', help: 'Le nom qui apparaîtra au point de vente, sur les factures et dans le stock' }, { k: 'code', l: 'Code (facultatif)', ph: 'Ex. PF-BIS-25CL' },
           { k: 'type', l: 'Type', t: 'select', opts: opts('item_type'), req: true }, { k: 'category_id', l: 'Catégorie', t: 'ref', ref: 'categories' },
           { k: 'unit', l: 'Unité', t: 'select', opts: UNITS, help: 'Matières : kg · Emballages, consommables, matériel : pièce · Jus : sachet ou bouteille' },
           { k: 'unit_volume', l: 'Contenance par unité (litres)', t: 'number', help: 'Ex. 0,125 pour un sachet de 12,5 cl · 1 pour une bouteille d\'1 L', show: (d) => MADE.includes(d.type) },
