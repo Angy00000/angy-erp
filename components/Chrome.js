@@ -175,7 +175,11 @@ export function UpdateBanner() {
       try {
         const html = await (await fetch('/?v=' + Date.now(), { cache: 'no-store' })).text();
         const m = html.match(/"buildId":"([^"]+)"/);
-        if (m && m[1] !== mine) setReady(true);
+        if (m && m[1] !== mine) {
+          // Aucune fenêtre ouverte (pas de saisie en cours) : on recharge tout seul la nouvelle version
+          if (!document.querySelector('.modal') && !document.querySelector('input:focus, textarea:focus, select:focus')) { location.reload(); return; }
+          setReady(true);
+        }
       } catch { /* hors connexion : on réessaiera */ }
     };
     const t = setInterval(check, 60e3);

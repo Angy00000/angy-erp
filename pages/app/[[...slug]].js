@@ -92,7 +92,7 @@ export default function AppShell() {
             <button className="side-ic" title="Se déconnecter" onClick={logout}><Ic n="logout" s={16} /></button>
           </div>
           <InstallApp />
-          <div className="side-sign">ANGY ERP · un produit Angy Company</div>
+          <div className="side-sign">ANGY ERP · un produit Angy Company<br /><span title="Version installée">Version {CHANGELOG[0]?.v}</span></div>
         </div>
       </aside>
       <div className="main">
