@@ -70,14 +70,14 @@ export default function PrintDoc() {
           <a className="btn" href={waLink(cust?.phone, msg)} target="_blank" rel="noreferrer">Envoyer par WhatsApp</a>
           <button className="btn primary" onClick={() => window.print()}>Imprimer / enregistrer en PDF</button>
         </div>
-        <Header title={LABELS.sale_type[d.type]} right={<div style={{ marginTop: 6 }}>Date : {date(d.date)}{d.due_date && <><br />Échéance : {date(d.due_date)}</>}</div>} />
+        <Header title={LABELS.sale_type[d.type]} right={<div style={{ marginTop: 6 }}>Date : {date(d.date)}{d.due_date && <><br />{d.type === 'commande' ? 'Livraison prévue' : 'Échéance'} : {date(d.due_date)}</>}</div>} />
         <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 20 }}>
           <div style={S.box}><div style={{ fontSize: 11, color: '#85918a', fontWeight: 700 }}>CLIENT</div><div style={{ fontWeight: 800, fontSize: 15 }}>{cust?.name || d.customer_name || 'Client comptoir'}</div>
             {cust?.address && <div>{cust.address}</div>}{cust?.phone && <div>{cust.phone}</div>}</div>
         </div>
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
           <thead><tr><th style={S.th}>Désignation</th><th style={{ ...S.th, ...S.r }}>Qté</th><th style={{ ...S.th, ...S.r }}>Prix unit.</th><th style={{ ...S.th, ...S.r }}>Remise</th><th style={{ ...S.th, ...S.r }}>Total</th></tr></thead>
-          <tbody>{d.lines.map((l) => <tr key={l.id}><td style={S.td}>{l.item_name || l.description}</td><td style={{ ...S.td, ...S.r }}>{num(l.qty)} {l.unit}</td><td style={{ ...S.td, ...S.r }}>{money(l.unit_price)}</td><td style={{ ...S.td, ...S.r }}>{l.discount ? money(l.discount) : ''}</td><td style={{ ...S.td, ...S.r }}>{money(l.total)}</td></tr>)}</tbody>
+          <tbody>{d.lines.map((l) => <tr key={l.id}><td style={S.td}>{l.item_name || l.description}{l.lot_number && <div style={{ fontSize: 11, color: '#4b5a52' }}>Lot {l.lot_number}{l.lot_expiry ? ` · DLC ${date(l.lot_expiry)}` : ''}</div>}</td><td style={{ ...S.td, ...S.r }}>{num(l.qty)} {l.unit}</td><td style={{ ...S.td, ...S.r }}>{money(l.unit_price)}</td><td style={{ ...S.td, ...S.r }}>{l.discount ? money(l.discount) : ''}</td><td style={{ ...S.td, ...S.r }}>{money(l.total)}</td></tr>)}</tbody>
         </table>
         <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 16 }}>
           <table style={{ minWidth: 300 }}><tbody>

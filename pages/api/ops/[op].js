@@ -25,9 +25,15 @@ async function validateSale(t, user, doc) {
   if (doc.type === 'facture') {
     for (const l of lines) {
       if (!l.item_id || n(l.qty) <= 0) continue;
-      const out = await stockOut(t, user, { item_id: l.item_id, qty: l.qty, type: 'vente', ref_type: 'sales_docs', ref_id: doc.id, note: doc.number });
+      if (l.lot_id) {
+        const lot = await t.one('SELECT lot_number, status FROM lots WHERE id=$1 AND item_id=$2', [l.lot_id, l.item_id]);
+        if (!lot) fail('Le lot choisi ne correspond pas au produit');
+        if (lot.status !== 'ok') fail(`Le lot ${lot.lot_number} est bloqué (${lot.status}) : il ne peut pas être vendu`);
+      }
+      const out = await stockOut(t, user, { item_id: l.item_id, lot_id: l.lot_id || undefined, qty: l.qty, type: 'vente', ref_type: 'sales_docs', ref_id: doc.id, note: doc.number });
       const uc = n(l.qty) ? out.cost / n(l.qty) : 0;
-      await t.q('UPDATE sales_lines SET unit_cost=$1 WHERE id=$2', [uc, l.id]);
+      // Traçabilité : on garde le lot vendu sur la ligne (quand un seul lot a servi)
+      await t.q('UPDATE sales_lines SET unit_cost=$1, lot_id=COALESCE(lot_id,$3) WHERE id=$2', [uc, l.id, out.consumed.length === 1 ? out.consumed[0].lot_id : null]);
       cost += out.cost;
     }
   }
@@ -310,9 +316,28 @@ const OPS = {
     const nd = await t.one(`INSERT INTO sales_docs (company_id,number,type,customer_id,date,due_date,status,subtotal,discount,tax,total,channel,parent_id,notes,user_id)
       VALUES ($1,$2,$3,$4,current_date,$5,'brouillon',$6,$7,$8,$9,$10,$11,$12,$13) RETURNING *`,
       [user.cid, number, to, doc.customer_id, doc.due_date, doc.subtotal, doc.discount, doc.tax, doc.total, doc.channel, doc.id, doc.notes, user.uid]);
-    await t.q('INSERT INTO sales_lines (doc_id,item_id,description,qty,unit_price,discount,total) SELECT $1,item_id,description,qty,unit_price,discount,total FROM sales_lines WHERE doc_id=$2', [nd.id, doc.id]);
+    await t.q('INSERT INTO sales_lines (doc_id,item_id,description,qty,unit_price,discount,total,lot_id) SELECT $1,item_id,description,qty,unit_price,discount,total,lot_id FROM sales_lines WHERE doc_id=$2 ORDER BY id', [nd.id, doc.id]);
     await t.q("UPDATE sales_docs SET status='transforme' WHERE id=$1", [doc.id]);
     return nd;
+  }],
+  // Livrer une commande client : facture créée, stock déduit (lot choisi ou automatique), encaissement éventuel.
+  order_deliver: [['ventes'], async (t, user, b) => {
+    const doc = await getDoc(t, user, b.id);
+    if (doc.type !== 'commande' || !['brouillon', 'valide'].includes(doc.status)) fail('Seule une commande en cours peut être livrée');
+    const lots = b.lots || {};
+    for (const [lineId, lotId] of Object.entries(lots)) {
+      if (lotId) await t.q('UPDATE sales_lines SET lot_id=$1 WHERE id=$2 AND doc_id=$3', [Number(lotId), Number(lineId), doc.id]);
+    }
+    const number = await nextNumber(t, user.cid, 'facture', 'FAC');
+    const nd = await t.one(`INSERT INTO sales_docs (company_id,number,type,customer_id,date,due_date,status,subtotal,discount,tax,total,channel,parent_id,notes,user_id)
+      VALUES ($1,$2,'facture',$3,$4,$5,'brouillon',$6,$7,$8,$9,$10,$11,$12,$13) RETURNING *`,
+      [user.cid, number, doc.customer_id, b.date || today(), doc.due_date, doc.subtotal, doc.discount, doc.tax, doc.total, doc.channel, doc.id, [doc.notes, `Livraison de la commande ${doc.number}`].filter(Boolean).join(' · '), user.uid]);
+    await t.q('INSERT INTO sales_lines (doc_id,item_id,description,qty,unit_price,discount,total,lot_id) SELECT $1,item_id,description,qty,unit_price,discount,total,lot_id FROM sales_lines WHERE doc_id=$2 ORDER BY id', [nd.id, doc.id]);
+    await t.q("UPDATE sales_docs SET status='transforme' WHERE id=$1", [doc.id]);
+    const v = await validateSale(t, user, nd);
+    const paid = Math.min(r2(n(b.paid)), n(nd.total));
+    if (paid > 0) await payDoc(t, user, { ...nd, status: v.status, paid: 0 }, { amount: paid, account_id: b.account_id, date: b.date });
+    return { id: nd.id, number, total: nd.total };
   }],
   // Vente comptoir en une étape : facture + sortie stock + encaissement
   pos_sale: [['ventes', 'caisse'], async (t, user, b) => {
@@ -330,8 +355,8 @@ const OPS = {
       VALUES ($1,$2,'facture',$3,current_date,'brouillon',$4,$5,$6,$7,$8) RETURNING *`,
       [user.cid, number, customer, subtotal, n(b.discount), total, b.channel || 'comptoir', user.uid]);
     for (const l of lines) {
-      await t.q('INSERT INTO sales_lines (doc_id,item_id,qty,unit_price,discount,total) VALUES ($1,$2,$3,$4,$5,$6)',
-        [doc.id, l.item_id, n(l.qty), n(l.unit_price), n(l.discount), r2(n(l.qty) * n(l.unit_price) - n(l.discount))]);
+      await t.q('INSERT INTO sales_lines (doc_id,item_id,qty,unit_price,discount,total,lot_id) VALUES ($1,$2,$3,$4,$5,$6,$7)',
+        [doc.id, l.item_id, n(l.qty), n(l.unit_price), n(l.discount), r2(n(l.qty) * n(l.unit_price) - n(l.discount)), l.lot_id ? Number(l.lot_id) : null]);
     }
     const v = await validateSale(t, user, doc);
     const paid = Math.min(r2(b.paid ?? total), total);

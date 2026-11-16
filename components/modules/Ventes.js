@@ -1,17 +1,19 @@
 import { useState } from 'react';
 import { op, crud, money, num, date, opts, today, LABELS } from '../../lib/client';
-import { Tabs, Badge, useRefOptions, run, confirmDo, invalidateRefs, toast } from '../ui';
+import { Tabs, Badge, useRefOptions, useData, run, confirmDo, invalidateRefs, toast } from '../ui';
+import Commandes from './Commandes';
 import CrudTable from '../CrudTable';
 import ActionModal from '../ActionModal';
 
 const accountField = { k: 'account_id', l: 'Compte d\'encaissement', t: 'ref', ref: 'accounts', params: { active: true }, req: true };
 
-export default function Ventes() {
+export default function Ventes({ can }) {
   const [tab, setTab] = useState('pos');
   return (
     <div>
-      <Tabs value={tab} onChange={setTab} tabs={[['pos', 'Point de vente'], ['docs', 'Factures, devis & commandes'], ['clients', 'Clients'], ['pay', 'Encaissements']]} />
+      <Tabs value={tab} onChange={setTab} tabs={[['pos', 'Point de vente'], ['cmd', 'Commandes clients'], ['docs', 'Factures, devis & commandes'], ['clients', 'Clients'], ['pay', 'Encaissements']]} />
       {tab === 'pos' && <POS />}
+      {tab === 'cmd' && <Commandes canProduce={!can || can('production')} />}
       {tab === 'docs' && <Docs />}
       {tab === 'clients' && <Clients />}
       {tab === 'pay' && <Payments />}
@@ -22,6 +24,8 @@ export default function Ventes() {
 function POS() {
   const [refresh, setRefresh] = useState(0);
   const items = useRefOptions('items', { active: true, _r: refresh });
+  const { data: lots } = useData(() => crud.list('lots', { instock: true, status: 'ok', limit: 1000 }), [refresh]);
+  const lotsOf = (id) => (lots || []).filter((x) => x.item_id === id).sort((a, b) => String(a.expiry_date || '9').localeCompare(String(b.expiry_date || '9')));
   const customers = useRefOptions('customers', {});
   const accounts = useRefOptions('accounts', { active: true });
   const [q, setQ] = useState('');
@@ -83,7 +87,13 @@ function POS() {
         {!cart.length && <div className="muted small" style={{ padding: '16px 0' }}>Touchez un produit pour l'ajouter</div>}
         {cart.map((l, idx) => (
           <div key={l.item_id} className="cart-line">
-            <div><div className="strong small">{l.name}</div>{l.type !== 'service' && Number(l.qty) > Number(l.stock) && <div className="neg small">Stock insuffisant ({num(l.stock)})</div>}</div>
+            <div><div className="strong small">{l.name}</div>{l.type !== 'service' && Number(l.qty) > Number(l.stock) && <div className="neg small">Stock insuffisant ({num(l.stock)})</div>}
+              {l.type !== 'service' && lotsOf(l.item_id).length > 1 && (
+                <select className="input lot-sel" value={l.lot_id || ''} onChange={(e) => setCart(cart.map((x, j) => (j === idx ? { ...x, lot_id: e.target.value ? Number(e.target.value) : '' } : x)))} title="Lot vendu">
+                  <option value="">Lot : automatique (le plus ancien)</option>
+                  {lotsOf(l.item_id).map((x) => <option key={x.id} value={x.id}>Lot {x.lot_number} · {num(x.qty)}{x.expiry_date ? ` · DLC ${date(x.expiry_date)}` : ''}</option>)}
+                </select>
+              )}</div>
             <input className="input" type="number" step="any" value={l.qty} onChange={(e) => setCart(cart.map((x, j) => (j === idx ? { ...x, qty: e.target.value } : x)))} />
             <input className="input" type="number" step="any" value={l.unit_price} onChange={(e) => setCart(cart.map((x, j) => (j === idx ? { ...x, unit_price: e.target.value } : x)))} />
             <button className="btn sm ghost" onClick={() => setCart(cart.filter((_, j) => j !== idx))}>✕</button>

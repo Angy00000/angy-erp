@@ -328,12 +328,12 @@ function ProdDetail({ id, onClose }) {
 const USED_TYPES = ['mp', 'emballage', 'consommable', 'semi_fini'];
 const itemCost = (it) => Number(it?.cost_price) || Number(it?.purchase_price) || 0;
 
-function QuickProd({ onClose }) {
+export function QuickProd({ onClose, initial, note }) {
   const products = useRefOptions('items', { type: 'pf', active: true });
   const { data: allItems } = useData(() => crud.list('items', { active: true, limit: 1000 }), []);
   const stockItems = (allItems || []).filter((x) => USED_TYPES.includes(x.type));
   const [d, setD] = useState({ date: today() });
-  const [rows, setRows] = useState([{}]);
+  const [rows, setRows] = useState(initial && initial.length ? initial : [{}]);
   const [usedRows, setUsedRows] = useState([{}]);
   const setUsed = (i, patch) => setUsedRows((r) => r.map((x, j) => (j === i ? { ...x, ...patch } : x)));
   const usedCalc = usedRows.map((r) => {
@@ -378,6 +378,7 @@ function QuickProd({ onClose }) {
     <Modal wide title="⚡ Production rapide" onClose={() => onClose(null)}
       footer={<><button className="btn" onClick={() => onClose(null)}>Annuler</button><button className="btn primary" disabled={busy} onClick={submit}>{busy ? 'Enregistrement…' : 'Enregistrer la production'}</button></>}>
       {err && <div className="err">{err}</div>}
+      {note && <div className="note" style={{ marginBottom: 12 }}>{note}</div>}
       <h3 style={{ fontSize: 14, margin: '0 0 8px' }}>Ce qui a été produit</h3>
       <div className="muted small" style={{ marginBottom: 8 }}>Une ligne par format. Ex. : Bissap en sachets <b>et</b> Bissap en bouteilles de 1 L. Les dépenses sont réparties selon les litres.</div>
       <div className="table-wrap"><table className="lines">

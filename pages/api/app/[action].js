@@ -2,6 +2,41 @@ import { handler, fail, n } from '../../../lib/api';
 import { q, one } from '../../../lib/db';
 import { can } from '../../../lib/perms';
 
+// Commandes clients en cours + ce qu'il faut produire. Le stock disponible est réservé aux commandes
+// dans l'ordre des dates de livraison (la plus proche d'abord).
+export async function openOrders(cid) {
+  const orders = await q(`SELECT d.id,d.number,d.date,d.due_date,d.total,d.status,d.notes,d.channel,c.name AS customer_name,c.phone AS customer_phone,
+      (d.due_date - current_date) AS days
+    FROM sales_docs d LEFT JOIN customers c ON c.id=d.customer_id
+    WHERE d.company_id=$1 AND d.type='commande' AND d.status IN ('brouillon','valide')
+    ORDER BY d.due_date NULLS LAST, d.date, d.id`, [cid]);
+  const ids = orders.map((o) => o.id);
+  const lines = ids.length ? await q(`SELECT sl.id,sl.doc_id,sl.item_id,sl.description,sl.qty,sl.unit_price,sl.total,sl.lot_id,i.name,i.unit,i.type,i.unit_volume
+    FROM sales_lines sl LEFT JOIN items i ON i.id=sl.item_id WHERE sl.doc_id = ANY($1::int[]) ORDER BY sl.id`, [ids]) : [];
+  const itemIds = [...new Set(lines.filter((l) => l.item_id).map((l) => l.item_id))];
+  const stocks = itemIds.length ? await q(`SELECT item_id, SUM(qty) AS s FROM lots WHERE status='ok' AND qty>0 AND item_id = ANY($1::int[]) GROUP BY item_id`, [itemIds]) : [];
+  const rem = new Map(stocks.map((r) => [r.item_id, n(r.s)]));
+  const stockOf = new Map(rem);
+  const needs = new Map();
+  for (const o of orders) {
+    o.lines = lines.filter((l) => l.doc_id === o.id);
+    for (const l of o.lines) {
+      if (!l.item_id || l.type === 'service') { l.ready = n(l.qty); l.missing = 0; continue; }
+      const have = rem.get(l.item_id) || 0;
+      l.ready = Math.min(have, n(l.qty));
+      l.missing = Math.round((n(l.qty) - l.ready) * 1000) / 1000;
+      rem.set(l.item_id, have - l.ready);
+      const nd = needs.get(l.item_id) || { item_id: l.item_id, name: l.name, unit: l.unit, unit_volume: n(l.unit_volume), ordered: 0, stock: stockOf.get(l.item_id) || 0, missing: 0, orders: [] };
+      nd.ordered += n(l.qty); nd.missing += l.missing;
+      if (l.missing > 0) nd.orders.push(o.number);
+      needs.set(l.item_id, nd);
+    }
+    o.ready = o.lines.every((l) => l.missing <= 0);
+  }
+  const list = [...needs.values()].map((x) => ({ ...x, missing: Math.round(x.missing * 1000) / 1000, missing_l: x.unit_volume ? Math.round(x.missing * x.unit_volume * 1000) / 1000 : null }));
+  return { orders, needs: list.sort((a, b) => b.missing - a.missing) };
+}
+
 // Fonctions transverses de l'application : recherche globale, notifications, annonces, aide
 export default handler(async (req, res, user) => {
   const { action } = req.query;
@@ -34,8 +69,24 @@ export default handler(async (req, res, user) => {
     return out;
   }
 
+  if (action === 'orders') {
+    if (!c('ventes') && !c('production')) fail('Accès refusé', 403);
+    return openOrders(cid);
+  }
+
   if (action === 'alerts') {
     const out = [];
+    if (c('ventes') || c('production')) {
+      const { orders, needs } = await openOrders(cid);
+      for (const o of orders.filter((x) => x.days !== null && x.days <= 2).slice(0, 5)) {
+        const late = o.days < 0;
+        out.push({ level: late || !o.ready ? 'red' : 'orange', mod: 'ventes', title: late ? 'Commande en retard' : o.days === 0 ? 'Commande à livrer aujourd\'hui' : `Commande à livrer dans ${o.days} j`,
+          text: `${o.number} — ${o.customer_name || 'client'}${o.ready ? ' · prête' : ' · stock insuffisant, à produire'}` });
+      }
+      for (const nd of needs.filter((x) => x.missing > 0).slice(0, 3)) {
+        out.push({ level: 'orange', mod: 'ventes', title: 'À produire pour les commandes', text: `${nd.name} : ${n(nd.missing)} ${nd.unit || ''}${nd.missing_l ? ` (${nd.missing_l} L)` : ''}` });
+      }
+    }
     if (c('stock') || c('production')) {
       for (const r of await q(`SELECT * FROM (SELECT i.name,i.unit,i.min_stock, COALESCE((SELECT SUM(qty) FROM lots l WHERE l.item_id=i.id AND l.status='ok'),0) AS stock
         FROM items i WHERE i.company_id=$1 AND i.active AND i.min_stock>0) x WHERE stock<min_stock ORDER BY stock LIMIT 10`, [cid]))
