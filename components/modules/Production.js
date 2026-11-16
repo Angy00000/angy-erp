@@ -19,22 +19,98 @@ export default function Production() {
   );
 }
 
+// Productions terminées, regroupées : une carte par production, ses formats en dessous
+function famOf(name) { const r = /^(.*?)\s*\(([^)]*)\)\s*$/.exec(String(name || '').trim()); return r ? { fam: r[1].trim(), fmt: r[2].trim() } : { fam: String(name || '').trim(), fmt: '' }; }
+function Batches({ onQuick, onDetail, onEdit, version }) {
+  const first = today().slice(0, 8) + '01';
+  const [range, setRange] = useState({ from: first, to: today() });
+  const [qs, setQs] = useState('');
+  const { data } = useData(() => crud.list('production_orders', { status: 'termine', from: range.from, to: range.to }), [range.from, range.to, version]);
+  if (!data) return <div className="spinner">Chargement…</div>;
+  const groups = new Map();
+  for (const r of data) { const k = r.batch_id || r.id; if (!groups.has(k)) groups.set(k, []); groups.get(k).push(r); }
+  const list = [...groups.values()].map((rows) => {
+    rows.sort((a, b) => (Number(a.unit_volume) || 0) - (Number(b.unit_volume) || 0));
+    const liters = rows.reduce((s2, r) => s2 + (Number(r.volume_l) || (Number(r.produced_qty) * (Number(r.unit_volume) || 0))), 0);
+    const cost = rows.reduce((s2, r) => s2 + Number(r.total_cost || 0), 0);
+    const sales = rows.reduce((s2, r) => s2 + Number(r.produced_qty || 0) * Number(r.product_price || 0), 0);
+    const fams = [...new Set(rows.map((r) => famOf(r.product_name).fam))];
+    return { rows, liters, cost, sales, profit: sales - cost, fams, date: rows[0].planned_date, id: rows[0].id, user: rows[0].user_name };
+  }).filter((g) => !qs || g.rows.some((r) => `${r.product_name} ${r.number} ${r.lot_number}`.toLowerCase().includes(qs.toLowerCase())))
+    .sort((a, b) => String(b.date).localeCompare(String(a.date)) || b.id - a.id);
+  const tot = list.reduce((m, g) => ({ l: m.l + g.liters, c: m.c + g.cost, s: m.s + g.sales }), { l: 0, c: 0, s: 0 });
+  return (
+    <div>
+      <div className="toolbar">
+        <button className="btn accent lg" onClick={onQuick}>⚡ Production rapide</button>
+        <input className="input" style={{ maxWidth: 220 }} placeholder="Rechercher un jus, un lot…" value={qs} onChange={(e) => setQs(e.target.value)} />
+        <div className="grow" />
+        <label className="small muted">Du <input type="date" className="input sm" value={range.from} onChange={(e) => setRange({ ...range, from: e.target.value })} /></label>
+        <label className="small muted">au <input type="date" className="input sm" value={range.to} onChange={(e) => setRange({ ...range, to: e.target.value })} /></label>
+      </div>
+      <div className="grid g3" style={{ marginBottom: 14 }}>
+        <Stat k="Produit sur la période" v={`${num(tot.l)} L`} s={`${list.length} production(s)`} />
+        <Stat k="Coût total" v={money(tot.c)} s="matières + emballages + dépenses" />
+        <Stat k="Bénéfice prévu (si tout est vendu)" v={money(tot.s - tot.c)} s={`ventes prévues ${money(tot.s)}`} accent={tot.s - tot.c > 0} />
+      </div>
+      {!list.length && <div className="card empty">Aucune production sur cette période. Cliquez <b>⚡ Production rapide</b> pour en enregistrer une.</div>}
+      <div className="batches">
+        {list.map((g) => (
+          <div key={g.id} className="batch card">
+            <div className="batch-h">
+              <div className="batch-date"><b>{new Date(String(g.date).slice(0, 10) + 'T00:00:00').getDate()}</b><span>{new Date(String(g.date).slice(0, 10) + 'T00:00:00').toLocaleDateString('fr-FR', { month: 'short' })}</span></div>
+              <div className="batch-t">
+                <h3>{g.fams.join(' + ')} <span className="batch-l">{num(g.liters)} L</span></h3>
+                <p>{g.rows.length} format(s) · {g.rows.map((r) => r.number.replace(/^OF-\d{4}-/, 'OF ')).join(', ')}{g.user ? ` · par ${g.user}` : ''}</p>
+              </div>
+              <div className="batch-k"><span>Coût</span><b>{money(g.cost)}</b></div>
+              <div className="batch-k"><span>Ventes prévues</span><b>{money(g.sales)}</b></div>
+              <div className={'batch-k ' + (g.profit >= 0 ? 'pos' : 'neg')}><span>Bénéfice prévu</span><b>{money(g.profit)}</b></div>
+              <div className="batch-a">
+                <button className="btn sm primary" onClick={() => onDetail(g.id)}>Coûts & bénéfice</button>
+                <button className="btn sm" onClick={() => onEdit(g.id)}>✏️ Modifier</button>
+              </div>
+            </div>
+            <div className="table-wrap"><table className="t batch-t2">
+              <thead><tr><th>Format</th><th className="r">Quantité</th><th className="r">Coût / unité</th><th className="r">Prix de vente</th><th className="r">Bénéfice / unité</th><th className="r">Déjà vendu</th><th /></tr></thead>
+              <tbody>{g.rows.map((r) => {
+                const f = famOf(r.product_name); const m = Number(r.product_price || 0) - Number(r.unit_cost || 0);
+                const sold = r.lot_id ? Math.max(0, Number(r.lot_initial || 0) - Number(r.lot_qty || 0)) : 0;
+                return (
+                  <tr key={r.id}>
+                    <td className="nm"><b>{g.fams.length > 1 ? r.product_name : f.fmt ? f.fmt.charAt(0).toUpperCase() + f.fmt.slice(1) : r.product_name}</b><div className="muted small mono">lot {r.lot_number}</div></td>
+                    <td className="r"><b>{num(r.produced_qty)} {r.product_unit || ''}</b>{Number(r.unit_volume) > 0 && <div className="muted small">{num(r.produced_qty * r.unit_volume)} L</div>}</td>
+                    <td className="r">{money(r.unit_cost)}</td>
+                    <td className="r">{Number(r.product_price) > 0 ? money(r.product_price) : <span className="muted">—</span>}</td>
+                    <td className={'r strong ' + (m >= 0 ? 'pos' : 'neg')}>{Number(r.product_price) > 0 ? money(m) : '—'}</td>
+                    <td className="r">{num(sold)} / {num(r.produced_qty)}</td>
+                    <td className="actions"><a className="btn sm ghost" href={`/print/production_orders/${r.id}`} target="_blank" rel="noreferrer">Fiche</a>{r.lot_id && <a className="btn sm ghost" href={`/etiquettes?lot=${r.lot_id}`} target="_blank" rel="noreferrer">Étiquettes</a>}</td>
+                  </tr>
+                );
+              })}</tbody>
+            </table></div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function Orders() {
   const [modal, setModal] = useState(null);
-  const close = (reload) => (ok) => { setModal(null); if (ok) { invalidateRefs('items'); invalidateRefs('lots'); reload(); } };
+  const [version, setVersion] = useState(0);
+  const refresh = () => { invalidateRefs('items'); invalidateRefs('lots'); invalidateRefs('accounts'); setVersion((v) => v + 1); };
+  const close = (reload) => (ok) => { setModal(null); if (ok) { refresh(); reload && reload(); } };
   return (
     <>
-      <CrudTable entity="production_orders" title="Ordre de fabrication" csvName="ordres-fabrication" newLabel="Planifier une production"
-        toolbar={(reload) => <button className="btn accent" onClick={() => setModal({ k: 'quick', reload })}>⚡ Production rapide</button>}
-        filters={[{ k: 'status', l: 'Statut', opts: opts('prod_status') }, { k: 'product_id', l: 'Produit', ref: 'items', params: { type: 'pf' } }]}
+      <Batches version={version} onQuick={() => setModal({ k: 'quick' })} onDetail={(id) => setModal({ k: 'detail', row: { id } })} onEdit={(id) => setModal({ k: 'edit', row: { id } })} />
+      <h3 className="sec-title">📋 Productions planifiées <span className="muted small">— préparées à l'avance avec une recette, à démarrer puis terminer</span></h3>
+      <CrudTable entity="production_orders" title="Production planifiée" csvName="productions-planifiees" newLabel="Planifier une production" params={{ status: 'planifie,en_cours' }}
+        empty="Aucune production planifiée. (Facultatif — pour le quotidien, utilisez ⚡ Production rapide.)"
         columns={[
-          { k: 'number', l: 'N° OF', fmt: (r) => <span className="strong">{r.number}</span>, csv: (r) => r.number },
+          { k: 'number', l: 'N°', fmt: (r) => <span className="strong">{r.number}</span>, csv: (r) => r.number },
           { k: 'product_name', l: 'Produit' }, { k: 'planned_date', l: 'Date prévue', t: 'date' },
-          { k: 'planned_qty', l: 'Prévu', r: true, fmt: (r) => `${num(r.planned_qty)} ${r.product_unit || ''}`, csv: (r) => r.planned_qty },
-          { k: 'produced_qty', l: 'Produit', r: true, fmt: (r) => (r.status === 'termine' ? <>{num(r.produced_qty)}{r.rejected_qty > 0 && <span className="neg small"> (−{num(r.rejected_qty)})</span>}</> : '—'), csv: (r) => r.produced_qty },
-          { k: 'lot_number', l: 'Lot', fmt: (r) => <span className="mono">{r.lot_number}</span>, csv: (r) => r.lot_number },
-          { k: 'unit_cost', l: 'Coût unitaire', r: true, fmt: (r) => (r.status === 'termine' ? money(r.unit_cost) : ''), csv: (r) => r.unit_cost },
-          { k: 'total_cost', l: 'Coût total', t: 'money' },
+          { k: 'planned_qty', l: 'À produire', r: true, fmt: (r) => `${num(r.planned_qty)} ${r.product_unit || ''}`, csv: (r) => r.planned_qty },
           { k: 'status', l: 'Statut', t: 'badge', map: 'prod_status' },
         ]}
         defaults={() => ({ planned_date: today() })}
@@ -60,8 +136,8 @@ function Orders() {
       {modal?.k === 'check' && <CheckModal row={modal.row} onClose={() => setModal(null)} />}
       {modal?.k === 'done' && <CompleteModal row={modal.row} onClose={(ok) => { const row = modal.row; close(modal.reload)(ok); if (ok) setModal({ k: 'detail', row }); }} />}
       {modal?.k === 'detail' && <ProdDetail id={modal.row.id} onClose={() => setModal(null)} />}
-      {modal?.k === 'edit' && <EditProd id={modal.row.id} onClose={(res) => { const rl = modal.reload; setModal(null); if (res) { invalidateRefs('items'); invalidateRefs('lots'); invalidateRefs('accounts'); rl(); } }} />}
-      {modal?.k === 'quick' && <QuickProd onClose={(res) => { const rl = modal.reload; setModal(res && res.orders?.length === 1 ? { k: 'detail', row: { id: res.id } } : null); if (res) { invalidateRefs('items'); invalidateRefs('lots'); rl(); } }} />}
+      {modal?.k === 'edit' && <EditProd id={modal.row.id} onClose={(res) => { setModal(null); if (res) refresh(); }} />}
+      {modal?.k === 'quick' && <QuickProd onClose={(res) => { setModal(res && res.orders?.length === 1 ? { k: 'detail', row: { id: res.id } } : null); if (res) refresh(); }} />}
     </>
   );
 }
@@ -228,10 +304,10 @@ function Profitability() {
       </div>
       <div className="space" />
       <div className="card"><div className="table-wrap"><table className="t">
-        <thead><tr><th>Production</th><th className="r">Quantité</th><th className="r">Coût total</th><th className="r">Coût / unité</th><th className="r">Vendu</th><th className="r">Rapporté</th><th className="r">Bénéfice réalisé</th><th className="r">Bénéfice prévu</th><th /></tr></thead>
+        <thead><tr><th>Production</th><th className="r">Quantité</th><th className="r">Coût total</th><th className="r">Coût / unité</th><th className="r">Vendu</th><th className="r">Rapporté</th><th className="r">Bénéfice<br />réalisé</th><th className="r">Bénéfice<br />prévu</th><th /></tr></thead>
         <tbody>{rows.map((r) => (
           <tr key={r.id}>
-            <td><span className="strong">{r.product}</span><br /><span className="muted small">{r.number} · lot <span className="mono">{r.lot_number}</span> · {date(r.date)}</span></td>
+            <td className="nm"><span className="strong">{r.product}</span><br /><span className="muted small nw">{date(r.date)} · {r.number}</span></td>
             <td className="r">{num(r.produced_qty)} {r.unit}{r.liters > 0 && <><br /><span className="muted small">{num(r.liters)} L</span></>}</td>
             <td className="r">{money(r.real_cost)}</td>
             <td className="r">{money(r.real_unit_cost)}</td>
@@ -239,7 +315,7 @@ function Profitability() {
             <td className="r">{money(r.revenue)}</td>
             <td className="r"><span className={'strong ' + (r.profit < 0 ? 'neg' : 'pos')}>{money(r.profit)}</span></td>
             <td className="r"><span className={r.projected_profit < 0 ? 'neg' : ''}>{money(r.projected_profit)}</span></td>
-            <td className="actions"><button className="btn sm" onClick={() => setDetail(r.id)}>Détail</button><button className="btn sm" onClick={() => setEditing(r.id)}>✏️ Modifier</button></td>
+            <td className="actions nw"><button className="btn sm" onClick={() => setDetail(r.id)}>Détail</button><button className="btn sm" onClick={() => setEditing(r.id)} title="Modifier">✏️</button></td>
           </tr>
         ))}</tbody>
         {rows.length > 0 && <tfoot><tr><td>Total</td><td /><td className="r">{money(sum('real_cost'))}</td><td /><td className="r">{num(sum('sold_qty'))}</td><td className="r">{money(sum('revenue'))}</td><td className="r">{money(sum('profit'))}</td><td className="r">{money(sum('projected_profit'))}</td><td /></tr></tfoot>}

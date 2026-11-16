@@ -70,8 +70,13 @@ export default handler(async (req, res, user) => {
     const qs = req.query;
     for (const f of cfg.filters || []) {
       if (qs[f] !== undefined && qs[f] !== '') {
-        params.push(qs[f] === 'true' ? true : qs[f] === 'false' ? false : qs[f]);
-        where.push(`${alias}.${f}=$${params.length}`);
+        if (String(qs[f]).includes(',')) {
+          params.push(String(qs[f]).split(','));
+          where.push(`${alias}.${f}::text = ANY($${params.length}::text[])`);
+        } else {
+          params.push(qs[f] === 'true' ? true : qs[f] === 'false' ? false : qs[f]);
+          where.push(`${alias}.${f}=$${params.length}`);
+        }
       }
     }
     if (qs.search && cfg.search) {

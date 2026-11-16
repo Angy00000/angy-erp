@@ -153,13 +153,11 @@ function Lots() {
         filters={[{ k: 'status', l: 'Statut', opts: opts('lot_status') }, { k: 'item_id', l: 'Article', ref: 'items' }, { k: 'warehouse_id', l: 'Entrepôt', ref: 'warehouses' }]}
         columns={[
           { k: 'lot_number', l: 'Lot', fmt: (r) => <span className="mono strong">{r.lot_number}</span>, csv: (r) => r.lot_number },
-          { k: 'item_name', l: 'Article' },
+          { k: 'item_name', l: 'Article', fmt: (r) => <><b>{r.item_name}</b><div className="muted small">{[r.warehouse_name, r.supplier_name].filter(Boolean).join(' · ')}</div></>, csv: (r) => r.item_name },
           { k: 'qty', l: 'Quantité', r: true, fmt: (r) => `${num(r.qty)} ${r.unit}`, csv: (r) => r.qty },
           { k: 'unit_cost', l: 'Coût unit.', t: 'money' },
-          { k: 'warehouse_name', l: 'Entrepôt' },
           { k: 'production_date', l: 'Fabriqué / reçu', t: 'date' },
-          { k: 'expiry_date', l: 'DLC', fmt: (r) => { const d = daysUntil(r.expiry_date); return r.expiry_date ? <span className={d < 0 ? 'neg strong' : d < 15 ? 'neg' : ''}>{new Date(r.expiry_date + 'T00:00:00').toLocaleDateString('fr-FR')}{d !== null && d < 31 ? ` (J${d >= 0 ? '-' + d : '+' + -d})` : ''}</span> : '—'; }, csv: (r) => r.expiry_date },
-          { k: 'supplier_name', l: 'Fournisseur' },
+          { k: 'expiry_date', l: 'DLC', fmt: (r) => { const d = daysUntil(r.expiry_date); return r.expiry_date ? <span className={'nw ' + (d < 0 ? 'neg strong' : d < 15 ? 'neg' : '')}>{new Date(r.expiry_date + 'T00:00:00').toLocaleDateString('fr-FR')}{d !== null && d < 31 ? ` (J${d >= 0 ? '-' + d : '+' + -d})` : ''}</span> : '—'; }, csv: (r) => r.expiry_date },
           { k: 'status', l: 'Statut', t: 'badge', map: 'lot_status' },
         ]}
         canDelete={() => false}
@@ -186,10 +184,10 @@ function Moves() {
     <CrudTable entity="stock_movements" title="Mouvement" csvName="mouvements-stock" canCreate={false}
       filters={[{ k: 'type', l: 'Type', opts: opts('move_type') }, { k: 'item_id', l: 'Article', ref: 'items' }]}
       columns={[
-        { k: 'created_at', l: 'Date', fmt: (r) => new Date(r.created_at).toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' }), csv: (r) => r.created_at },
-        { k: 'type', l: 'Type', map: 'move_type' }, { k: 'item_name', l: 'Article' }, { k: 'lot_number', l: 'Lot', fmt: (r) => <span className="mono">{r.lot_number}</span>, csv: (r) => r.lot_number },
+        { k: 'created_at', l: 'Date', fmt: (r) => <span className="nw">{new Date(r.created_at).toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' })}<div className="muted small">{r.user_name || ''}</div></span>, csv: (r) => r.created_at },
+        { k: 'type', l: 'Type', map: 'move_type' }, { k: 'item_name', l: 'Article', fmt: (r) => <><b>{r.item_name}</b><div className="muted small mono">{r.lot_number}</div></>, csv: (r) => r.item_name },
         { k: 'qty', l: 'Quantité', r: true, fmt: (r) => <span className={r.qty < 0 ? 'neg' : 'pos'}>{r.qty > 0 ? '+' : ''}{num(r.qty)} {r.unit}</span>, csv: (r) => r.qty },
-        { k: 'unit_cost', l: 'Coût unit.', t: 'money' }, { k: 'note', l: 'Référence' }, { k: 'user_name', l: 'Par' },
+        { k: 'unit_cost', l: 'Coût unit.', t: 'money' }, { k: 'note', l: 'Référence' },
       ]}
     />
   );

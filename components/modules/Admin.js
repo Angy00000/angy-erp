@@ -85,7 +85,7 @@ function Users() {
       <div className="card card-pad">
         <h3>Accès par rôle</h3>
         <div className="table-wrap"><table className="t">
-          <thead><tr><th>Rôle</th>{MODULES.map((m) => <th key={m.key} style={{ textAlign: 'center' }}>{m.label.split(' ')[0]}</th>)}</tr></thead>
+          <thead><tr><th>Rôle</th>{MODULES.map((m) => <th key={m.key} style={{ textAlign: 'center' }} title={m.label}>{({ admin: 'Admin', dashboard: 'Tableau' })[m.key] || m.label.replace(/^Le /, '').split(/[ &]/)[0]}</th>)}</tr></thead>
           <tbody>{Object.entries(ROLES).map(([k, r]) => <tr key={k}><td className="strong">{r.label}</td>{MODULES.map((m) => <td key={m.key} style={{ textAlign: 'center' }}>{can(k, m.key) ? <span className="pos strong">✓</span> : <span className="muted">—</span>}</td>)}</tr>)}</tbody>
         </table></div>
       </div>

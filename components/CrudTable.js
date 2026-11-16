@@ -2,6 +2,17 @@ import { useState, useMemo } from 'react';
 import { crud, exportCSV, money, num, monthStart, today } from '../lib/client';
 import { useData, Modal, Form, Cell, run, toast, invalidateRefs, RefSelect, confirmDo, useRefOptions } from './ui';
 
+// Classes de colonnes : chiffres à droite sans retour à la ligne, dates/n°/statuts sur une ligne, noms jamais écrasés
+const NOWRAP = ['number', 'code', 'lot_number', 'date', 'status'];
+const NAMES = ['name', 'product_name', 'item_name', 'customer_name', 'supplier_name', 'label', 'description'];
+function colClass(c) {
+  if (c.t === 'money' || c.t === 'qty' || c.r) return 'r';
+  if (c.t === 'date' || c.t === 'badge' || NOWRAP.includes(c.k)) return 'nw';
+  if (NAMES.includes(c.k)) return 'nm';
+  if (c.k === 'note' || c.k === 'notes') return 'clip';
+  return '';
+}
+
 export default function CrudTable({
   entity, title, columns, fields, defaults, filters = [], dateRange, params: fixedParams, rowActions, toolbar,
   canEdit = () => true, canDelete = () => true, canCreate = true, lines, csvName, sums = [], onSaved, newLabel, empty,
@@ -71,7 +82,7 @@ export default function CrudTable({
             <tbody>
               {rows.map((row) => (
                 <tr key={row.id}>
-                  {columns.map((c) => <td key={c.k + c.l} className={c.t === 'money' || c.t === 'qty' || c.r ? 'r' : ''}><Cell c={c} row={row} /></td>)}
+                  {columns.map((c) => <td key={c.k + c.l} className={colClass(c)} title={colClass(c) === 'clip' ? String(row[c.k] ?? '') : undefined}><Cell c={c} row={row} /></td>)}
                   <td className="actions">
                     {rowActions && rowActions(row, reload)}
                     {fields && canEdit(row) && <button className="btn sm" onClick={() => open(row)}>Modifier</button>}
