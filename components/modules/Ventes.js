@@ -25,6 +25,22 @@ export default function Ventes({ can, company }) {
   );
 }
 
+// Regroupe « Jus de bissap (sachet 12,5 cl) », « Jus de bissap (bouteille 1 L) »… sous « Jus de bissap »
+function groupProducts(list) {
+  const m = new Map();
+  for (const i of list) {
+    const r = /^(.*?)\s*\(([^)]*)\)\s*$/.exec(String(i.name).trim());
+    const fam = r ? r[1].trim() : String(i.name).trim();
+    const key = fam.toLowerCase();
+    if (!m.has(key)) m.set(key, { name: fam, items: [] });
+    m.get(key).items.push({ ...i, format: r ? r[2].charAt(0).toUpperCase() + r[2].slice(1) : '' });
+  }
+  for (const g of m.values()) g.items.sort((a, b) => (Number(a.unit_volume) || 0) - (Number(b.unit_volume) || 0) || Number(a.sale_price) - Number(b.sale_price));
+  return [...m.values()].sort((a, b) => a.name.localeCompare(b.name, 'fr'));
+}
+const FAM_COLORS = { bissap: '#b0213a', bouye: '#c9a97a', gingembre: '#d9a21b', moringa: '#3f8a3a', tamarin: '#7a4a2a', mangue: '#f0a020', orange: '#f07a10', ananas: '#e6c229', citron: '#b5c925', corossol: '#8fbf6a' };
+const famColor = (n) => { const k = Object.keys(FAM_COLORS).find((x) => n.toLowerCase().includes(x)); if (k) return FAM_COLORS[k]; let h = 0; for (const c of n) h = (h * 31 + c.charCodeAt(0)) % 360; return `hsl(${h} 45% 42%)`; };
+
 function POS() {
   const [refresh, setRefresh] = useState(0);
   const items = useRefOptions('items', { active: true, _r: refresh });
@@ -76,12 +92,25 @@ function POS() {
             <option value="detail">Prix détail</option><option value="gros">Prix de gros</option>
           </select>
         </div>
-        <div className="tiles">
-          {sellable.map((i) => (
-            <button key={i.id} className={'tile' + (i.type !== 'service' && i.stock <= 0 ? ' out' : '')} onClick={() => add(i)}>
-              <div className="nm">{i.name}</div>
-              <div><div className="pr">{money(price(i))}</div><div className="st">{i.type === 'service' ? 'Service' : `Stock : ${num(i.stock)} ${i.unit || ''}`}</div></div>
-            </button>
+        <div className="pos-fams">
+          {groupProducts(sellable).map((g) => (
+            <div key={g.name} className="pos-fam">
+              <div className="pos-fam-h"><span className="pos-av" style={{ background: famColor(g.name) }}>{g.name.replace(/^jus (de |d')?/i, '').slice(0, 1).toUpperCase()}</span><b>{g.name}</b></div>
+              <div className="pos-fmts">
+                {g.items.map((i) => {
+                  const out = i.type !== 'service' && !(Number(i.stock) > 0);
+                  const inCart = cart.find((x) => x.item_id === i.id);
+                  return (
+                    <button key={i.id} className={'pos-fmt' + (out ? ' out' : '') + (inCart ? ' in' : '')} onClick={() => add(i)} title={i.name}>
+                      <span className="f">{g.items.length > 1 || i.format ? (i.format || i.name) : 'Ajouter'}</span>
+                      <span className="p">{money(price(i))}</span>
+                      <span className="s">{i.type === 'service' ? 'Service' : out ? 'Épuisé' : `${num(i.stock)} en stock`}</span>
+                      {inCart && <span className="q">{num(inCart.qty)}</span>}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
           ))}
           {!sellable.length && <div className="muted">Aucun produit vendable. Ajoutez des articles avec un prix de vente dans Stock & Articles.</div>}
         </div>

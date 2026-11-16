@@ -43,29 +43,85 @@ const STOCK_OUT_FIELDS = [
   { k: 'note', l: 'Note', full: true },
 ];
 
+// Contenance lisible : 0,125 → 12,5 cl · 0,25 → 25 cl · 1 → 1 L
+export const fmtVol = (v) => { const x = Number(v) || 0; if (!x) return ''; return x < 1 ? `${String(Math.round(x * 1000) / 10).replace('.', ',')} cl` : `${String(x).replace('.', ',')} L`; };
+const TYPE_TABS = [['', 'Tout', '▦'], ['pf', 'Produits finis', '🧃'], ['mp', 'Matières premières', '🌿'], ['emballage', 'Emballages', '🍶'], ['consommable', 'Consommables', '🧴'], ['materiel', 'Matériel', '🛠️'], ['semi_fini', 'Semi-finis', '⚗️'], ['service', 'Services', '🤝']];
+function StockState({ r }) {
+  if (r.type === 'service') return <span className="muted">—</span>;
+  if (!(Number(r.stock) > 0)) return <span className="badge red">Épuisé</span>;
+  if (Number(r.min_stock) > 0 && Number(r.stock) < Number(r.min_stock)) return <span className="badge amber">Bientôt fini</span>;
+  return <span className="badge green">En stock</span>;
+}
+
+// Résumé par jus : litres en stock tous formats confondus
+function JuiceSummary({ items }) {
+  const m = new Map();
+  for (const i of items) {
+    const r = /^(.*?)\s*\(([^)]*)\)\s*$/.exec(String(i.name).trim());
+    const fam = r ? r[1].trim() : String(i.name).trim();
+    const g = m.get(fam) || { name: fam, liters: 0, value: 0, parts: [] };
+    g.liters += (Number(i.stock) || 0) * (Number(i.unit_volume) || 0);
+    g.value += (Number(i.stock) || 0) * (Number(i.sale_price) || 0);
+    if (Number(i.stock) > 0) g.parts.push(`${num(i.stock)} ${r ? r[2] : i.unit}`);
+    m.set(fam, g);
+  }
+  const list = [...m.values()].sort((a, b) => a.name.localeCompare(b.name, 'fr'));
+  if (!list.length) return null;
+  return (
+    <div className="juice-sum">
+      {list.map((g) => (
+        <div key={g.name} className={'juice-card' + (g.liters > 0 ? '' : ' empty')}>
+          <span className="jn">{g.name}</span>
+          <b>{g.liters > 0 ? `${num(g.liters)} L` : 'Épuisé'}</b>
+          <small>{g.parts.length ? g.parts.join(' · ') : 'à produire'}</small>
+          {g.value > 0 && <small className="jv">vaut {money(g.value)}</small>}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function Items() {
   const [modal, setModal] = useState(null);
+  const [type, setType] = useState('');
+  const all = useRefOptions('items', {});
+  const counts = all.reduce((m, i) => ({ ...m, [i.type]: (m[i.type] || 0) + 1 }), {});
   const done = (reload) => (ok) => { setModal(null); if (ok) { invalidateRefs('items'); invalidateRefs('lots'); reload(); } };
+  const nameCol = { k: 'name', l: 'Article', fmt: (r) => <><span className="strong">{r.name}</span>{!r.active && <span className="muted small"> (inactif)</span>}<br /><span className="muted small">{[type ? null : LABELS.item_type[r.type], r.category_name, r.code].filter(Boolean).join(' · ')}</span></>, csv: (r) => r.name };
+  const stockCol = { k: 'stock', l: 'En stock', r: true, fmt: (r) => r.type === 'service' ? '—' : <><span className={'strong' + (Number(r.stock) > 0 ? '' : ' neg')}>{num(r.stock)} {r.unit}</span>{MADE.includes(r.type) && Number(r.unit_volume) > 0 && Number(r.stock) > 0 && <><br /><span className="muted small">= {num(r.stock * r.unit_volume)} L</span></>}{Number(r.stock_blocked) > 0 && <><br /><span className="neg small">+ {num(r.stock_blocked)} bloqué</span></>}</>, csv: (r) => r.stock };
+  const stateCol = { k: 'state', l: 'État', fmt: (r) => <StockState r={r} />, csv: (r) => (Number(r.stock) > 0 ? 'en stock' : 'épuisé') };
+  const columns = type === 'pf' ? [
+    nameCol,
+    { k: 'unit_volume', l: 'Format', fmt: (r) => fmtVol(r.unit_volume) ? <span className="badge gray">{r.unit} {fmtVol(r.unit_volume)}</span> : <span className="muted">{r.unit}</span>, csv: (r) => fmtVol(r.unit_volume) },
+    stockCol, stateCol,
+    { k: 'sale_price', l: 'Prix de vente', r: true, fmt: (r) => <span className="strong">{money(r.sale_price)}</span>, csv: (r) => r.sale_price },
+    { k: 'cost_price', l: 'Coût de revient', r: true, fmt: (r) => (Number(r.cost_price) > 0 ? money(r.cost_price) : <span className="muted">après 1re production</span>), csv: (r) => r.cost_price },
+    { k: 'value', l: 'Vaut à la vente', r: true, fmt: (r) => money(r.stock * r.sale_price), csv: (r) => Math.round(r.stock * r.sale_price) },
+  ] : [
+    nameCol, stockCol, stateCol,
+    { k: 'cost_price', l: 'Prix d\'achat moyen', r: true, fmt: (r) => (Number(r.cost_price) > 0 ? <>{money(r.cost_price)}<span className="muted small"> / {r.unit}</span></> : <span className="muted">—</span>), csv: (r) => r.cost_price },
+    ...(type ? [] : [{ k: 'sale_price', l: 'Prix de vente', r: true, fmt: (r) => (SOLD.includes(r.type) ? money(r.sale_price) : <span className="muted">—</span>), csv: (r) => (SOLD.includes(r.type) ? r.sale_price : '') }]),
+    { k: 'value', l: 'Valeur du stock', r: true, fmt: (r) => money(r.stock * r.cost_price), csv: (r) => Math.round(r.stock * r.cost_price) },
+  ];
   return (
     <>
-      <CrudTable entity="items" title="Article" csvName="articles" newLabel="Nouvel article"
-        filters={[{ k: 'type', l: 'Type', opts: opts('item_type') }, { k: 'category_id', l: 'Catégorie', ref: 'categories' }]}
+      <div className="type-chips">
+        {TYPE_TABS.filter(([k]) => !k || counts[k]).map(([k, l, ic]) => (
+          <button key={k || 'all'} className={type === k ? 'on' : ''} onClick={() => setType(k)}>
+            <span>{ic}</span>{l}<b>{k ? counts[k] : all.length}</b>
+          </button>
+        ))}
+      </div>
+      {type === 'pf' && <JuiceSummary items={all.filter((i) => i.type === 'pf' && i.active !== false)} />}
+      <CrudTable key={type || 'all'} entity="items" title="Article" csvName="articles" newLabel="Nouvel article" params={type ? { type } : {}}
+        filters={[{ k: 'category_id', l: 'Catégorie', ref: 'categories' }]}
         toolbar={(reload) => <>
           <button className="btn primary" onClick={() => setModal({ k: 'market', reload })}>🛒 Nouvel achat</button>
           <button className="btn" onClick={() => setModal({ k: 'in', reload })}>⬇ Entrée stock</button>
           <button className="btn" onClick={() => setModal({ k: 'out', reload })}>⬆ Sortie / perte</button>
         </>}
-        columns={[
-          { k: 'code', l: 'Code' },
-          { k: 'name', l: 'Article', fmt: (r) => <><span className="strong">{r.name}</span>{!r.active && <span className="muted small"> (inactif)</span>}<br /><span className="muted small">{r.category_name}</span></> , csv: (r) => r.name },
-          { k: 'type', l: 'Type', map: 'item_type' },
-          { k: 'stock', l: 'Stock', r: true, fmt: (r) => r.type === 'service' ? '—' : <span className={r.min_stock > 0 && r.stock < r.min_stock ? 'neg strong' : ''}>{num(r.stock)} {r.unit}</span>, csv: (r) => r.stock },
-          { k: 'stock_blocked', l: 'Bloqué', r: true, fmt: (r) => (r.stock_blocked > 0 ? <span className="neg">{num(r.stock_blocked)}</span> : ''), csv: (r) => r.stock_blocked },
-          { k: 'cost_price', l: 'Coût moyen', t: 'money' },
-          { k: 'sale_price', l: 'Prix vente', r: true, fmt: (r) => (SOLD.includes(r.type) ? money(r.sale_price) : <span className="muted">—</span>), csv: (r) => (SOLD.includes(r.type) ? r.sale_price : '') },
-          { k: 'value', l: 'Valeur stock', r: true, fmt: (r) => money(r.stock * r.cost_price), csv: (r) => Math.round(r.stock * r.cost_price) },
-        ]}
-        defaults={{ type: 'pf', unit: 'unité', active: true }}
+        columns={columns}
+        defaults={{ type: type || 'pf', unit: type === 'mp' ? 'kg' : type === 'pf' ? 'bouteille' : 'pièce', active: true }}
         fields={[
           { k: 'name', l: 'Nom de l\'article', req: true, ph: 'Ex. Jus de bissap (bouteille 25 cl) · Sucre en poudre', help: 'Le nom qui apparaîtra au point de vente, sur les factures et dans le stock' }, { k: 'code', l: 'Code (facultatif)', ph: 'Ex. PF-BIS-25CL' },
           { k: 'type', l: 'Type', t: 'select', opts: opts('item_type'), req: true }, { k: 'category_id', l: 'Catégorie', t: 'ref', ref: 'categories' },
