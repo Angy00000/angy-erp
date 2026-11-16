@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/router';
 import { api, crud, money, num, date, setCurrency, LABELS } from '../../../lib/client';
+import { waLink } from '../../../components/Chrome';
 
 const S = {
   page: { maxWidth: 820, margin: '0 auto', padding: '36px 40px', background: '#fff', minHeight: '100vh', fontSize: 13 },
@@ -56,9 +57,15 @@ export default function PrintDoc() {
 
   if (kind === 'sales_docs') {
     const cust = data.customer;
+    const msg = `Bonjour${cust?.name ? ' ' + cust.name : ''},\n\n${LABELS.sale_type[d.type]} ${d.number} du ${date(d.date)} — ${c.name}\n` +
+      d.lines.map((l) => `• ${num(l.qty)} × ${l.item_name || l.description} = ${money(l.total)}`).join('\n') +
+      `\n\nTotal : ${money(d.total)}` + (d.type === 'facture' ? `\nPayé : ${money(d.paid)}\nReste à payer : ${money(d.total - d.paid)}` : '') + `\n\nMerci pour votre confiance.`;
     return (
       <div style={S.page}>
-        <Tools />
+        <div className="no-print" style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginBottom: 16 }}>
+          <a className="btn" href={waLink(cust?.phone, msg)} target="_blank" rel="noreferrer">Envoyer par WhatsApp</a>
+          <button className="btn primary" onClick={() => window.print()}>Imprimer / enregistrer en PDF</button>
+        </div>
         <Header title={LABELS.sale_type[d.type]} right={<div style={{ marginTop: 6 }}>Date : {date(d.date)}{d.due_date && <><br />Échéance : {date(d.due_date)}</>}</div>} />
         <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 20 }}>
           <div style={S.box}><div style={{ fontSize: 11, color: '#85918a', fontWeight: 700 }}>CLIENT</div><div style={{ fontWeight: 800, fontSize: 15 }}>{cust?.name || d.customer_name || 'Client comptoir'}</div>
