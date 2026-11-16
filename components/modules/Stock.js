@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { op, money, num, opts, today, daysUntil, LABELS } from '../../lib/client';
-import { Tabs, Badge, invalidateRefs } from '../ui';
+import { Tabs, Badge, invalidateRefs, Modal, useRefOptions, RefSelect, toast } from '../ui';
 import CrudTable from '../CrudTable';
 import ActionModal from '../ActionModal';
 
@@ -29,7 +29,8 @@ export default function Stock() {
 
 const STOCK_IN_FIELDS = [
   { k: 'item_id', l: 'Article', t: 'ref', ref: 'items', params: { active: true }, req: true, full: true, label: (r) => `${r.name} (${r.unit || ''})` },
-  { k: 'qty', l: 'Quantité', t: 'number', req: true }, { k: 'unit_cost', l: 'Coût unitaire', t: 'number', help: 'Vide = coût moyen actuel' },
+  { k: 'qty', l: 'Quantité', t: 'number', req: true }, { k: 'unit_cost', l: 'Prix payé par unité', t: 'number', help: 'Ex. prix d\'un kg. Vide = coût moyen actuel' },
+  { k: 'account_id', l: 'Payé via (compte)', t: 'ref', ref: 'accounts', params: { active: true }, placeholder: 'Ne pas toucher à la caisse', help: 'L\'argent (quantité × prix) sort de ce compte. Vide si déjà payé ou don.' },
   { k: 'lot_number', l: 'N° de lot', ph: 'Automatique si vide' }, { k: 'expiry_date', l: 'Date limite (DLC/DLUO)', t: 'date', help: 'Vide = calculée selon la durée de vie' },
   { k: 'warehouse_id', l: 'Entrepôt', t: 'ref', ref: 'warehouses' }, { k: 'supplier_id', l: 'Fournisseur', t: 'ref', ref: 'suppliers', quickCreate: { label: 'fournisseur', fields: ['name', 'phone'] } },
   { k: 'note', l: 'Note', full: true },
@@ -49,6 +50,7 @@ function Items() {
       <CrudTable entity="items" title="Article" csvName="articles" newLabel="Nouvel article"
         filters={[{ k: 'type', l: 'Type', opts: opts('item_type') }, { k: 'category_id', l: 'Catégorie', ref: 'categories' }]}
         toolbar={(reload) => <>
+          <button className="btn primary" onClick={() => setModal({ k: 'market', reload })}>🛒 Achat au marché</button>
           <button className="btn" onClick={() => setModal({ k: 'in', reload })}>⬇ Entrée stock</button>
           <button className="btn" onClick={() => setModal({ k: 'out', reload })}>⬆ Sortie / perte</button>
         </>}
@@ -76,6 +78,7 @@ function Items() {
           { k: 'description', l: 'Description / spécifications', t: 'textarea', full: true }, { k: 'active', l: 'Article actif', t: 'bool' },
         ]}
       />
+      {modal?.k === 'market' && <MarketPurchase onClose={(ok) => { const r = modal.reload; setModal(null); if (ok) { invalidateRefs('items'); invalidateRefs('accounts'); r(); } }} />}
       {modal?.k === 'in' && <ActionModal title="Entrée en stock" fields={STOCK_IN_FIELDS} initial={{}} onSubmit={(d) => op('stock_in', d)} onClose={done(modal.reload)} />}
       {modal?.k === 'out' && <ActionModal title="Sortie de stock (FEFO)" fields={STOCK_OUT_FIELDS} initial={{ type: 'sortie' }} onSubmit={(d) => op('stock_out', d)} onClose={done(modal.reload)}>
         <div className="note" style={{ marginBottom: 12 }}>La sortie consomme automatiquement les lots qui expirent en premier (FEFO).</div>
@@ -132,5 +135,64 @@ function Moves() {
         { k: 'unit_cost', l: 'Coût unit.', t: 'money' }, { k: 'note', l: 'Référence' }, { k: 'user_name', l: 'Par' },
       ]}
     />
+  );
+}
+
+
+// Achat au marché : plusieurs articles en une fois, entrés en stock et payés depuis un compte.
+export function MarketPurchase({ onClose }) {
+  const items = useRefOptions('items', { active: true }).filter((i) => ['mp', 'emballage', 'consommable', 'materiel', 'semi_fini'].includes(i.type));
+  const accounts = useRefOptions('accounts', { active: true });
+  const [rows, setRows] = useState([{}, {}, {}]);
+  const [d, setD] = useState({ date: today() });
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState(null);
+  const setRow = (i, x) => setRows((r) => r.map((y, j) => (j === i ? { ...y, ...x } : y)));
+  const total = rows.reduce((s, r) => s + (Number(r.qty) || 0) * (Number(r.unit_cost) || 0), 0);
+  const acc = d.account_id === undefined ? (accounts[0]?.id || '') : d.account_id;
+  const save = async () => {
+    setErr(null); setBusy(true);
+    try {
+      const r = await op('market_purchase', { ...d, account_id: acc || null, lines: rows.filter((x) => x.item_id && Number(x.qty) > 0) });
+      toast(`Achat enregistré : ${r.count} article(s), ${money(r.total)}${acc ? ' sortis de la caisse' : ''}`);
+      onClose(true);
+    } catch (e) { setErr(e.message); setBusy(false); }
+  };
+  const groups = { mp: 'Matières premières', emballage: 'Emballages', consommable: 'Consommables', materiel: 'Matériel', semi_fini: 'Semi-finis' };
+  return (
+    <Modal wide title="🛒 Achat au marché" onClose={() => onClose(false)}
+      footer={<><button className="btn" onClick={() => onClose(false)}>Annuler</button><button className="btn primary" disabled={busy || total <= 0} onClick={save}>{busy ? 'Enregistrement…' : `Enregistrer l'achat${total > 0 ? ' — ' + money(total) : ''}`}</button></>}>
+      {err && <div className="err">{err}</div>}
+      <div className="note" style={{ marginBottom: 12 }}>Tout ce que vous avez acheté et ramené : chaque article <b>entre dans le stock</b> et le total <b>sort de la caisse</b> choisie.</div>
+      <div className="table-wrap"><table className="lines">
+        <thead><tr><th style={{ minWidth: 230 }}>Article</th><th>En stock</th><th style={{ width: 110 }}>Quantité</th><th style={{ width: 130 }}>Prix par unité</th><th className="r">Total</th><th /></tr></thead>
+        <tbody>{rows.map((r, i) => {
+          const it = items.find((x) => x.id === Number(r.item_id));
+          return (
+            <tr key={i}>
+              <td><select className="input" value={r.item_id || ''} onChange={(e) => { const x = items.find((y) => y.id === Number(e.target.value)); setRow(i, { item_id: x ? x.id : '', unit_cost: x && Number(x.cost_price || x.purchase_price) > 0 ? String(Number(x.cost_price || x.purchase_price)) : '' }); }}>
+                <option value="">— Choisir —</option>
+                {Object.entries(groups).map(([t, l]) => { const list = items.filter((x) => x.type === t); return list.length ? <optgroup key={t} label={l}>{list.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</optgroup> : null; })}
+              </select></td>
+              <td className="small muted">{it ? `${num(it.stock)} ${it.unit || ''}` : ''}</td>
+              <td><input type="number" step="any" className="input" placeholder={it?.unit || ''} value={r.qty || ''} onChange={(e) => setRow(i, { qty: e.target.value })} disabled={!it} /></td>
+              <td><input type="number" step="any" className="input" placeholder={it ? `F / ${it.unit || 'unité'}` : ''} value={r.unit_cost || ''} onChange={(e) => setRow(i, { unit_cost: e.target.value })} disabled={!it} /></td>
+              <td className="r mono">{Number(r.qty) > 0 && Number(r.unit_cost) > 0 ? money(Number(r.qty) * Number(r.unit_cost)) : ''}</td>
+              <td>{rows.length > 1 && <button className="btn sm ghost" onClick={() => setRows(rows.filter((_, j) => j !== i))}>✕</button>}</td>
+            </tr>
+          );
+        })}</tbody>
+        {total > 0 && <tfoot><tr><td colSpan={4} className="strong">Total payé</td><td className="r mono strong">{money(total)}</td><td /></tr></tfoot>}
+      </table></div>
+      <button className="btn sm" style={{ marginTop: 8 }} onClick={() => setRows([...rows, {}])}>+ Ajouter un article</button>
+      {!items.length && <div className="note" style={{ marginTop: 8 }}>Créez d'abord vos matières premières et emballages : <b>+ Nouvel article</b>.</div>}
+      <div className="form" style={{ marginTop: 14 }}>
+        <div className="field"><label>Payé avec</label><select className="input" value={acc} onChange={(e) => setD({ ...d, account_id: e.target.value ? Number(e.target.value) : '' })}>
+          {accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}<option value="">Ne pas toucher à la caisse (déjà payé)</option></select></div>
+        <div className="field"><label>Date</label><input type="date" className="input" value={d.date} onChange={(e) => setD({ ...d, date: e.target.value })} /></div>
+        <div className="field"><label>Fournisseur (facultatif)</label><RefSelect f={{ ref: 'suppliers', placeholder: 'Marché / divers', quickCreate: { label: 'fournisseur', fields: ['name', 'phone'] } }} value={d.supplier_id} onChange={(v) => setD({ ...d, supplier_id: v })} /></div>
+        <div className="field"><label>Note</label><input className="input" placeholder="Ex. Marché Castor" value={d.note || ''} onChange={(e) => setD({ ...d, note: e.target.value })} /></div>
+      </div>
+    </Modal>
   );
 }

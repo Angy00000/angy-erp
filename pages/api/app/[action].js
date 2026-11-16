@@ -99,6 +99,8 @@ export default handler(async (req, res, user) => {
       const tot = exp.reduce((s, x) => s + Number(x.amount), 0);
       L.push('', `🧾 *Dépenses* : ${exp.length ? F(tot) : 'aucune'}`); for (const r of exp.slice(0, 6)) L.push(`  • ${r.label || r.category} : ${F(r.amount)}`);
       if (exp.length > 6) L.push(`  • … et ${exp.length - 6} autre(s)`);
+      const buy = await one(`SELECT COALESCE(-SUM(amount),0) AS v FROM cash_transactions WHERE company_id=$1 AND date=$2 AND category='Achat matières'`, [cid, day]);
+      if (Number(buy.v) > 0) L.push(`🛒 *Achats de matières et emballages* : ${F(buy.v)}`);
       const bal = await q(`SELECT a.name, a.initial_balance+COALESCE((SELECT SUM(amount) FROM cash_transactions t WHERE t.account_id=a.id AND t.date<=$2),0) AS b
         FROM accounts a WHERE a.company_id=$1 AND a.active ORDER BY a.id`, [cid, day]);
       L.push(`🏦 *Soldes en fin de journée* : ${F(bal.reduce((s, x) => s + Number(x.b), 0))}`); for (const r of bal) L.push(`  • ${r.name} : ${F(r.b)}`);

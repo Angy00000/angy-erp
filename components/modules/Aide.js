@@ -10,7 +10,7 @@ export const REQ_STATUS = { nouvelle: ['Envoyée', 'amber'], en_cours: ['En cour
 
 const GUIDE = [
   ['Enregistrer une production', 'Production → ⚡ Production rapide → 1) le jus et les litres (+ Ajouter un autre format pour les bouteilles) → 2) ce qu\'on a pris dans le magasin (bissap, sucre, sachets…) : c\'est retiré du stock automatiquement → 3) les autres dépenses (gaz, transport…) → Enregistrer.'],
-  ['Enregistrer un achat de matières', 'Stock & Articles → ⬇ Entrée stock → l\'article, la quantité et le prix payé. Le stock augmente.'],
+  ['Enregistrer un achat de matières', 'Stock & Articles → 🛒 Achat au marché → les articles, quantités et prix, puis la caisse qui a payé. Le stock augmente et l\'argent sort de la caisse.'],
   ['Vendre', 'Ventes & Clients → Point de vente → toucher les produits → choisir Caisse / Wave / Orange Money → Encaisser la vente.'],
   ['Créer une recette', 'Production → Recettes → + Nouvelle recette → le jus, la quantité obtenue (ex. 80 sachets = 10 L) et les matières (bissap, sucre, sachets…). Ensuite la Production rapide se remplit toute seule.'],
   ['Confier des jus à une vendeuse', 'Ventes & Clients → Vendeurs & dépôts → + Confier des produits le matin. Le soir : Retour & argent → ce qu\'elle rapporte et l\'argent remis. Le logiciel calcule ce qui a été vendu et ce qu\'elle doit encore.'],

@@ -65,7 +65,33 @@ async function requirements(t, user, po, qtyOverride) {
 
 const OPS = {
   // ---------- STOCK ----------
-  stock_in: ['stock', async (t, user, b) => stockIn(t, user, { ...b, type: 'entree', ref_type: b.ref_type || 'manuel' })],
+  // Entrée en stock (achat, don, retour…). Si « Payé via » est choisi, l'argent sort du compte.
+  stock_in: ['stock', async (t, user, b) => {
+    const lot = await stockIn(t, user, { ...b, type: 'entree', ref_type: b.ref_type || 'manuel' });
+    const total = r2(n(b.qty) * n(b.unit_cost));
+    if (b.account_id && total > 0) {
+      const it = await t.one('SELECT name FROM items WHERE id=$1', [b.item_id]);
+      await cashTx(t, user, { account_id: b.account_id, amount: -total, category: 'Achat matières', label: `Achat ${it?.name || ''} (${n(b.qty)})`, ref_type: 'lots', ref_id: lot.id, date: b.date });
+    }
+    return lot;
+  }],
+  // Achat au marché : plusieurs articles d'un coup, entrés en stock et payés en une fois
+  market_purchase: [['stock', 'achats'], async (t, user, b) => {
+    const lines = (b.lines || []).filter((l) => Number(l.item_id) && n(l.qty) > 0);
+    if (!lines.length) fail('Ajoutez au moins un article avec une quantité');
+    let total = 0; const names = [];
+    for (const l of lines) {
+      if (n(l.unit_cost) < 0) fail('Prix invalide');
+      await stockIn(t, user, { item_id: Number(l.item_id), qty: n(l.qty), unit_cost: n(l.unit_cost), supplier_id: b.supplier_id || null, warehouse_id: b.warehouse_id, type: 'achat', ref_type: 'achat_marche', note: b.note || 'Achat au marché' });
+      total += n(l.qty) * n(l.unit_cost);
+      const it = await t.one('SELECT name FROM items WHERE id=$1', [l.item_id]); names.push(it?.name);
+    }
+    total = r2(total);
+    if (b.account_id && total > 0) {
+      await cashTx(t, user, { account_id: b.account_id, amount: -total, category: 'Achat matières', label: `Achat au marché : ${names.slice(0, 4).join(', ')}${names.length > 4 ? '…' : ''}`, ref_type: 'achat_marche', date: b.date });
+    }
+    return { total, count: lines.length };
+  }],
   stock_out: ['stock', async (t, user, b) => stockOut(t, user, { ...b, type: b.type || 'sortie', ref_type: 'manuel' })],
   inventory: ['stock', async (t, user, b) => {
     const lot = await t.one('SELECT * FROM lots WHERE id=$1 AND company_id=$2 FOR UPDATE', [b.lot_id, user.cid]);
