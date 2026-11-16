@@ -14,7 +14,8 @@ import Rapports from '../../components/modules/Rapports';
 import Admin from '../../components/modules/Admin';
 import Aide from '../../components/modules/Aide';
 import Imprimes from '../../components/modules/Imprimes';
-import { SearchPalette, Bell, Announcements, PasswordModal, useTheme, waLink, InstallApp } from '../../components/Chrome';
+import { SearchPalette, Bell, Announcements, PasswordModal, useTheme, waLink, InstallApp, UpdateBanner, WhatsNew } from '../../components/Chrome';
+import { CHANGELOG } from '../../lib/changelog';
 
 const VIEWS = { dashboard: Dashboard, ventes: Ventes, caisse: Caisse, stock: Stock, achats: Achats, production: Production, qualite: Qualite, rh: RH, rapports: Rapports, admin: Admin, aide: Aide, imprimes: Imprimes };
 const SUBTITLES = {
@@ -109,6 +110,7 @@ export default function AppShell() {
             <span><b>{me.company.status === 'essai' ? 'Période d\'essai' : 'Abonnement'}</b> : se termine {daysLeft <= 0 ? 'aujourd\'hui' : `dans ${daysLeft} jour(s)`}. Contactez Angy Company pour continuer sans interruption.</span>
             <button className="btn sm" onClick={() => go('aide')}>Contacter</button></div>
         )}
+        <UpdateBanner />
         <Announcements />
         <div className="content">
           <div className="page-head">
@@ -120,6 +122,7 @@ export default function AppShell() {
       {open && <div className="side-ov" onClick={() => setOpen(false)} />}
       {search && <SearchPalette onClose={() => setSearch(false)} go={go} />}
       {pwd && <PasswordModal onClose={() => setPwd(false)} />}
+      {!me.user.support && <WhatsNew list={CHANGELOG} />}
     </div>
   );
 }

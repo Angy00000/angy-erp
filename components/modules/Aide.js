@@ -3,6 +3,7 @@ import { api, datetime } from '../../lib/client';
 import { useData, toast } from '../ui';
 import { Ic } from './Dashboard';
 import { waLink } from '../Chrome';
+import { CHANGELOG } from '../../lib/changelog';
 
 export const REQ_TYPES = { probleme: ['Un problème', 'red'], suggestion: ['Une suggestion', 'blue'], question: ['Une question', 'amber'] };
 export const REQ_STATUS = { nouvelle: ['Envoyée', 'amber'], en_cours: ['En cours', 'blue'], faite: ['Réglée', 'green'], refusee: ['Non retenue', 'gray'] };
@@ -73,6 +74,12 @@ export default function Aide({ contact }) {
         </div>
       </div>
       <div>
+        <div className="panel" style={{ marginBottom: 14 }}>
+          <div className="panel-h"><span className="panel-ic"><Ic n="megaphone" s={16} /></span><h3>Nouveautés</h3></div>
+          {CHANGELOG.map((e, i) => (
+            <details key={e.v} className="guide" open={i === 0}><summary>{e.title} <span className="muted small">· {e.date}</span></summary><ul className="news-ul">{e.items.map((x) => <li key={x}>{x}</li>)}</ul></details>
+          ))}
+        </div>
         <div className="panel">
           <div className="panel-h"><span className="panel-ic"><Ic n="star" s={16} /></span><h3>Guide rapide</h3></div>
           {GUIDE.map(([t, d]) => (

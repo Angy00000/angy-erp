@@ -3,7 +3,7 @@ import Head from 'next/head';
 import { money, num, date, datetime, today } from '../lib/client';
 import { Modal, Form, toast, Tabs } from '../components/ui';
 import { Ic } from '../components/modules/Dashboard';
-import { waLink } from '../components/Chrome';
+import { waLink, UpdateBanner } from '../components/Chrome';
 import { REQ_TYPES, REQ_STATUS } from '../components/modules/Aide';
 
 async function call(action, body, params) {
@@ -77,6 +77,7 @@ function ConsoleApp({ admin, onLogout }) {
       </aside>
       <div className="main">
         <header className="topbar2"><button className="icon-btn menu-btn" onClick={() => setOpen(true)}><Ic n="menu" s={20} /></button><b className="muted">Console de la plateforme ANGY ERP</b><span style={{ flex: 1 }} /><a className="btn sm" href="/" target="_blank" rel="noreferrer">Voir le site</a></header>
+        <UpdateBanner />
         <div className="content">
           <div className="page-head"><div><h1>{NAV.find((x) => x[0] === tab)?.[1]}</h1></div></div>
           {tab === 'vue' && <Vue go={go} />}

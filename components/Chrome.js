@@ -162,3 +162,70 @@ export function InstallApp() {
     </>
   );
 }
+
+// ---------- Mise à jour : nouvelle version disponible ----------
+// Chaque mise en ligne change l'identifiant de version de Next.js : on le compare régulièrement
+// à celui de la page ouverte et on propose de recharger.
+export function UpdateBanner() {
+  const [ready, setReady] = useState(false);
+  useEffect(() => {
+    const mine = window.__NEXT_DATA__?.buildId;
+    if (!mine || mine === 'development') return undefined;
+    const check = async () => {
+      try {
+        const html = await (await fetch('/?v=' + Date.now(), { cache: 'no-store' })).text();
+        const m = html.match(/"buildId":"([^"]+)"/);
+        if (m && m[1] !== mine) setReady(true);
+      } catch { /* hors connexion : on réessaiera */ }
+    };
+    const t = setInterval(check, 5 * 60e3);
+    const vis = () => document.visibilityState === 'visible' && check();
+    document.addEventListener('visibilitychange', vis);
+    check();
+    return () => { clearInterval(t); document.removeEventListener('visibilitychange', vis); };
+  }, []);
+  if (!ready) return null;
+  const update = async () => {
+    try {
+      const regs = await navigator.serviceWorker?.getRegistrations?.();
+      await Promise.all((regs || []).map((r) => r.update()));
+      const keys = await caches?.keys?.();
+      await Promise.all((keys || []).map((k) => caches.delete(k)));
+    } catch { /* */ }
+    location.reload();
+  };
+  return (
+    <div className="maj">
+      <span className="maj-ic">⟳</span>
+      <span><b>Nouvelle version d'ANGY ERP disponible.</b> Terminez ce que vous faites, puis mettez à jour.</span>
+      <button className="btn sm accent" onClick={update}>Mettre à jour</button>
+    </div>
+  );
+}
+
+// ---------- Nouveautés : affichées une fois après chaque mise à jour ----------
+export function WhatsNew({ list }) {
+  const [show, setShow] = useState(null);
+  useEffect(() => {
+    if (!list?.length) return;
+    let seen = null;
+    try { seen = localStorage.getItem('erp_seen_version'); } catch { /* */ }
+    if (seen !== list[0].v) { // jamais vu (ex. utilisateurs existants) : on montre la dernière nouveauté
+      const idx = list.findIndex((x) => x.v === seen);
+      setShow(idx === -1 ? list.slice(0, 1) : list.slice(0, idx));
+    }
+  }, [list]);
+  if (!show?.length) return null;
+  const close = () => { try { localStorage.setItem('erp_seen_version', list[0].v); } catch { /* */ } setShow(null); };
+  return (
+    <Modal title="✨ Nouveautés d'ANGY ERP" onClose={close} footer={<button className="btn primary" onClick={close}>Compris</button>}>
+      {show.map((e) => (
+        <div key={e.v} className="news">
+          <div className="news-h"><b>{e.title}</b><span>{e.date}</span></div>
+          <ul>{e.items.map((x) => <li key={x}>{x}</li>)}</ul>
+        </div>
+      ))}
+      <p className="muted small" style={{ margin: '6px 0 0' }}>Toutes les nouveautés sont dans <b>Aide & suggestions</b>.</p>
+    </Modal>
+  );
+}
