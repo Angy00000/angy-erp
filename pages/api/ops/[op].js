@@ -64,6 +64,33 @@ async function requirements(t, user, po, qtyOverride) {
   return { lines: out, recipe: rec, factor };
 }
 
+// Coût moyen d'un article recalculé à partir de ses lots en stock
+async function refreshItemCost(t, itemId) {
+  await t.q(`UPDATE items SET cost_price = COALESCE((SELECT SUM(qty*unit_cost)/NULLIF(SUM(qty),0) FROM lots WHERE item_id=$1 AND qty>0), cost_price) WHERE id=$1`, [itemId]);
+}
+// Recalcule le coût d'une production terminée à partir de ce qu'elle a consommé (et la marge des ventes déjà faites)
+async function recomputeProd(t, poId) {
+  const po = await t.one('SELECT * FROM production_orders WHERE id=$1', [poId]);
+  if (!po || po.status !== 'termine' || !(n(po.produced_qty) > 0)) return;
+  const m = await t.one('SELECT COALESCE(SUM(qty*unit_cost),0) AS v FROM production_consumptions WHERE production_id=$1', [poId]);
+  const total = n(m.v) + n(po.labor_cost) + n(po.expense_cost) + n(po.overhead_cost);
+  const unit = total / n(po.produced_qty);
+  await t.q('UPDATE production_orders SET material_cost=$1, total_cost=$2, unit_cost=$3 WHERE id=$4', [r2(m.v), r2(total), unit, poId]);
+  if (po.lot_id) {
+    await t.q('UPDATE lots SET unit_cost=$1 WHERE id=$2', [unit, po.lot_id]);
+    await t.q('UPDATE stock_movements SET unit_cost=$1 WHERE lot_id=$2', [unit, po.lot_id]);
+    const docs = await t.q('UPDATE sales_lines SET unit_cost=$1 WHERE lot_id=$2 RETURNING doc_id', [unit, po.lot_id]);
+    for (const dId of [...new Set(docs.map((x) => x.doc_id))]) await t.q('UPDATE sales_docs SET cost=(SELECT COALESCE(SUM(qty*COALESCE(unit_cost,0)),0) FROM sales_lines WHERE doc_id=$1) WHERE id=$1', [dId]);
+    await refreshItemCost(t, po.product_id);
+  }
+}
+// Le prix d'un lot a été corrigé : ce qui en a déjà été utilisé en production est recompté au bon prix
+async function repriceLot(t, lotId, unitCost) {
+  await t.q('UPDATE stock_movements SET unit_cost=$1 WHERE lot_id=$2 AND qty<0', [unitCost, lotId]);
+  const prods = await t.q('UPDATE production_consumptions SET unit_cost=$1 WHERE lot_id=$2 RETURNING production_id', [unitCost, lotId]);
+  for (const id of [...new Set(prods.map((x) => x.production_id))]) await recomputeProd(t, id);
+}
+
 const num3 = (v) => String(Math.round(n(v) * 1000) / 1000).replace('.', ',');
 // Retire une ligne d'achat du stock (seulement si rien n'a encore été utilisé)
 async function removePurchaseLine(t, user, pur, o, used, keepLine) {
@@ -112,6 +139,7 @@ const OPS = {
           if (o.lot_id) {
             await t.q('UPDATE lots SET qty=qty+$1, initial_qty=$2, unit_cost=$3, supplier_id=$4, production_date=$5 WHERE id=$6', [delta, n(nl.qty), n(nl.unit_cost), b.supplier_id || null, date, o.lot_id]);
             await t.q("UPDATE stock_movements SET qty=$1, unit_cost=$2 WHERE lot_id=$3 AND ref_type='purchases' AND ref_id=$4 AND type IN ('achat','entree')", [n(nl.qty), n(nl.unit_cost), o.lot_id, pur.id]);
+            if (Math.abs(n(nl.unit_cost) - n(o.unit_cost)) > 1e-6) await repriceLot(t, o.lot_id, n(nl.unit_cost));
           }
           await t.q('UPDATE purchase_items SET qty=$1, unit_cost=$2 WHERE id=$3', [n(nl.qty), n(nl.unit_cost), o.id]);
         } else {
@@ -138,6 +166,8 @@ const OPS = {
     if (b.account_id && total > 0) {
       await cashTx(t, user, { account_id: b.account_id, amount: -total, category: 'Achat matières', label: `${pur.number} : ${names.slice(0, 4).join(', ')}${names.length > 4 ? '…' : ''}`, ref_type: 'purchases', ref_id: pur.id, date });
     }
+    const touched = await t.q('SELECT DISTINCT item_id FROM purchase_items WHERE purchase_id=$1', [pur.id]);
+    for (const x of touched) await refreshItemCost(t, x.item_id);
     return { id: pur.id, number: pur.number, total, count: lines.length, edited: !!b.id };
   }],
   purchase_cancel: [['stock', 'achats'], async (t, user, b) => {
@@ -148,6 +178,7 @@ const OPS = {
     for (const o of old) await removePurchaseLine(t, user, pur, o, o.lot_id ? Math.max(0, n(o.qty) - n(o.lot_qty)) : 0, true);
     await t.q("DELETE FROM cash_transactions WHERE company_id=$1 AND ref_type='purchases' AND ref_id=$2", [user.cid, pur.id]);
     await t.q("UPDATE purchases SET status='annule', updated_at=now() WHERE id=$1", [pur.id]);
+    for (const o of old) await refreshItemCost(t, o.item_id);
     return { ok: true, number: pur.number };
   }],
   stock_out: ['stock', async (t, user, b) => stockOut(t, user, { ...b, type: b.type || 'sortie', ref_type: 'manuel' })],
