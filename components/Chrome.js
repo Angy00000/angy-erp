@@ -178,7 +178,7 @@ export function UpdateBanner() {
         if (m && m[1] !== mine) setReady(true);
       } catch { /* hors connexion : on réessaiera */ }
     };
-    const t = setInterval(check, 5 * 60e3);
+    const t = setInterval(check, 60e3);
     const vis = () => document.visibilityState === 'visible' && check();
     document.addEventListener('visibilitychange', vis);
     check();
