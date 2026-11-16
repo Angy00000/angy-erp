@@ -9,7 +9,7 @@ export default function Production() {
   const [tab, setTab] = useState('of');
   return (
     <div>
-      <Tabs value={tab} onChange={setTab} tabs={[['of', 'Ordres de fabrication'], ['profit', 'Rentabilité par production'], ['plan', 'Planning'], ['mrp', 'Besoins matières'], ['recipes', 'Recettes / nomenclatures']]} />
+      <Tabs value={tab} onChange={setTab} tabs={[['of', 'Productions'], ['profit', 'Rentabilité par production'], ['plan', 'Planning'], ['mrp', 'Besoins matières'], ['recipes', 'Recettes / nomenclatures']]} />
       {tab === 'of' && <Orders />}
       {tab === 'profit' && <Profitability />}
       {tab === 'plan' && <Planning />}
@@ -24,7 +24,7 @@ function Orders() {
   const close = (reload) => (ok) => { setModal(null); if (ok) { invalidateRefs('items'); invalidateRefs('lots'); reload(); } };
   return (
     <>
-      <CrudTable entity="production_orders" title="Ordre de fabrication" csvName="ordres-fabrication" newLabel="OF avec recette"
+      <CrudTable entity="production_orders" title="Ordre de fabrication" csvName="ordres-fabrication" newLabel="Planifier une production"
         toolbar={(reload) => <button className="btn accent" onClick={() => setModal({ k: 'quick', reload })}>⚡ Production rapide</button>}
         filters={[{ k: 'status', l: 'Statut', opts: opts('prod_status') }, { k: 'product_id', l: 'Produit', ref: 'items', params: { type: 'pf' } }]}
         columns={[
