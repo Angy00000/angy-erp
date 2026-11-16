@@ -3,19 +3,21 @@ import { op, crud, money, num, date, opts, today, LABELS } from '../../lib/clien
 import { Tabs, Badge, useRefOptions, useData, run, confirmDo, invalidateRefs, toast } from '../ui';
 import Commandes from './Commandes';
 import Depots from './Depots';
+import Dettes from './Dettes';
 import CrudTable from '../CrudTable';
 import ActionModal from '../ActionModal';
 
 const accountField = { k: 'account_id', l: 'Compte d\'encaissement', t: 'ref', ref: 'accounts', params: { active: true }, req: true };
 
-export default function Ventes({ can }) {
+export default function Ventes({ can, company }) {
   const [tab, setTab] = useState('pos');
   return (
     <div>
-      <Tabs value={tab} onChange={setTab} tabs={[['pos', 'Point de vente'], ['cmd', 'Commandes clients'], ['depots', 'Vendeurs & dépôts'], ['docs', 'Factures, devis & commandes'], ['clients', 'Clients'], ['pay', 'Encaissements']]} />
+      <Tabs value={tab} onChange={setTab} tabs={[['pos', 'Point de vente'], ['cmd', 'Commandes clients'], ['depots', 'Vendeurs & dépôts'], ['docs', 'Factures, devis & commandes'], ['dettes', 'Dettes clients'], ['clients', 'Clients'], ['pay', 'Encaissements']]} />
       {tab === 'pos' && <POS />}
       {tab === 'cmd' && <Commandes canProduce={!can || can('production')} />}
       {tab === 'depots' && <Depots />}
+      {tab === 'dettes' && <Dettes company={company} />}
       {tab === 'docs' && <Docs />}
       {tab === 'clients' && <Clients />}
       {tab === 'pay' && <Payments />}

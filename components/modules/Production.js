@@ -49,6 +49,7 @@ function Orders() {
         rowActions={(r, reload) => <>
           {r.status === 'termine' && <button className="btn sm primary" onClick={() => setModal({ k: 'detail', row: r })}>Coûts & bénéfice</button>}
           <a className="btn sm" href={`/print/production_orders/${r.id}`} target="_blank" rel="noreferrer">Fiche</a>
+          {r.status === 'termine' && r.lot_id && <a className="btn sm" href={`/etiquettes?lot=${r.lot_id}`} target="_blank" rel="noreferrer">Étiquettes</a>}
           {['planifie', 'en_cours'].includes(r.status) && <button className="btn sm" onClick={() => setModal({ k: 'check', row: r })}>Besoins</button>}
           {r.status === 'planifie' && <button className="btn sm" onClick={() => run(() => op('prod_start', { id: r.id }), 'Production démarrée').then(reload)}>Démarrer</button>}
           {['planifie', 'en_cours'].includes(r.status) && <button className="btn sm primary" onClick={() => setModal({ k: 'done', row: r, reload })}>Terminer</button>}

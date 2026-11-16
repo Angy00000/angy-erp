@@ -11,6 +11,11 @@ export default function Imprimes({ company, go }) {
           Astuce : ajoutez votre logo dans <a href="/app/admin" onClick={(e) => { e.preventDefault(); go('admin'); }}><b>Administration → Entreprise</b></a> pour qu'il apparaisse sur toutes les fiches, factures et reçus.
         </div>
       )}
+      <a className="imp-card imp-feature" href="/etiquettes" target="_blank" rel="noreferrer" style={{ marginBottom: 22 }}>
+        <span className="imp-ic"><Ic n="print" s={20} /></span>
+        <span className="imp-t"><b>Étiquettes produits</b><small>À coller sur les sachets et bouteilles : logo, nom du jus, contenance, n° de lot, date de fabrication, date limite, code-barres. 3 tailles.</small></span>
+        <span className="imp-tags"><span className="badge green">Nouveau</span></span>
+      </a>
       {DOC_GROUPS.map(([g, keys]) => (
         <div key={g} style={{ marginBottom: 22 }}>
           <h3 className="imp-h"><Ic n={ICON[g]} s={17} />{g}</h3>

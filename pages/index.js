@@ -20,6 +20,10 @@ export default function Auth() {
   const [ct, setCt] = useState({});
   useEffect(() => { api('auth/contact').then(setCt).catch(() => {}); }, []);
   useEffect(() => { api('auth/me').then(() => router.replace('/app')).catch(() => {}); }, [router]);
+  useEffect(() => {
+    if (!router.isReady) return;
+    if (router.query.signup) { setMode('signup'); if (router.query.demo) setD((x) => ({ ...x, demo: true })); }
+  }, [router.isReady, router.query.signup, router.query.demo]);
   useEffect(() => { const t = setTimeout(() => setSlide((x) => (x + 1) % SLIDES.length), 6500); return () => clearTimeout(t); }, [slide]);
   const set = (k) => (e) => setD({ ...d, [k]: e.target.type === 'checkbox' ? e.target.checked : e.target.value });
   const go = (m) => { setMode(m); setErr(null); if (typeof window !== 'undefined' && window.innerWidth < 980) document.getElementById('acces')?.scrollIntoView({ behavior: 'smooth' }); };
@@ -41,6 +45,7 @@ export default function Auth() {
       <header className="lp-top">
         <div className="logo"><span className="logo-word">ANGY</span><img src="/img/logo.webp" alt="ERP" height={34} /></div>
         <div className="lp-top-r">
+          <a className="lp-btn ghost sm lp-hide-m" href="/presentation">Découvrir</a>
           <button className={'lp-btn ghost sm' + (mode === 'login' ? ' act' : '')} onClick={() => go('login')}>Connexion</button>
           <button className="lp-btn sm" onClick={() => go('signup')}>Créer mon espace</button>
         </div>
@@ -53,7 +58,7 @@ export default function Auth() {
           <p>Achats, stock par lots, fabrication, coût de revient et bénéfice de chaque production, ventes, caisse, qualité HACCP, RH et rapports — dans un seul logiciel, sur ordinateur, tablette et téléphone.</p>
           <div className="lp-cta">
             <button className="lp-btn lg" onClick={() => go('signup')}>Créer mon espace</button>
-            <button className="lp-btn ghost lg" onClick={() => go('login')}>Se connecter</button>
+            <a className="lp-btn ghost lg" href="/presentation">Découvrir le logiciel</a>
           </div>
           <div className="lp-chips">{CHIPS.map((c) => <span key={c}>{c}</span>)}</div>
         </section>

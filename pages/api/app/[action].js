@@ -5,13 +5,13 @@ import { can } from '../../../lib/perms';
 // Commandes clients en cours + ce qu'il faut produire. Le stock disponible est réservé aux commandes
 // dans l'ordre des dates de livraison (la plus proche d'abord).
 export async function openOrders(cid) {
-  const orders = await q(`SELECT d.id,d.number,d.date,d.due_date,d.total,d.status,d.notes,d.channel,c.name AS customer_name,c.phone AS customer_phone,
+  const orders = await q(`SELECT d.id,d.number,d.date,d.due_date,d.total,d.paid,d.advance_used,d.status,d.notes,d.channel,c.name AS customer_name,c.phone AS customer_phone,
       (d.due_date - current_date) AS days
     FROM sales_docs d LEFT JOIN customers c ON c.id=d.customer_id
     WHERE d.company_id=$1 AND d.type='commande' AND d.status IN ('brouillon','valide')
     ORDER BY d.due_date NULLS LAST, d.date, d.id`, [cid]);
   const ids = orders.map((o) => o.id);
-  const lines = ids.length ? await q(`SELECT sl.id,sl.doc_id,sl.item_id,sl.description,sl.qty,sl.unit_price,sl.total,sl.lot_id,i.name,i.unit,i.type,i.unit_volume
+  const lines = ids.length ? await q(`SELECT sl.id,sl.doc_id,sl.item_id,sl.description,sl.qty,sl.qty_delivered,sl.unit_price,sl.total,sl.lot_id,i.name,i.unit,i.type,i.unit_volume
     FROM sales_lines sl LEFT JOIN items i ON i.id=sl.item_id WHERE sl.doc_id = ANY($1::int[]) ORDER BY sl.id`, [ids]) : [];
   const itemIds = [...new Set(lines.filter((l) => l.item_id).map((l) => l.item_id))];
   const stocks = itemIds.length ? await q(`SELECT item_id, SUM(qty) AS s FROM lots WHERE status='ok' AND qty>0 AND item_id = ANY($1::int[]) GROUP BY item_id`, [itemIds]) : [];
@@ -20,18 +20,23 @@ export async function openOrders(cid) {
   const needs = new Map();
   for (const o of orders) {
     o.lines = lines.filter((l) => l.doc_id === o.id);
+    o.delivered_any = o.lines.some((l) => n(l.qty_delivered) > 0);
+    o.advance = Math.round((n(o.paid) - n(o.advance_used)) * 100) / 100;
+    o.remaining_value = o.lines.reduce((s, l) => s + (n(l.qty) - n(l.qty_delivered)) * n(l.unit_price), 0);
     for (const l of o.lines) {
-      if (!l.item_id || l.type === 'service') { l.ready = n(l.qty); l.missing = 0; continue; }
+      l.rest = Math.round((n(l.qty) - n(l.qty_delivered)) * 1000) / 1000;
+      if (!l.item_id || l.type === 'service') { l.ready = l.rest; l.missing = 0; continue; }
       const have = rem.get(l.item_id) || 0;
-      l.ready = Math.min(have, n(l.qty));
-      l.missing = Math.round((n(l.qty) - l.ready) * 1000) / 1000;
+      l.ready = Math.min(have, l.rest);
+      l.missing = Math.round((l.rest - l.ready) * 1000) / 1000;
       rem.set(l.item_id, have - l.ready);
       const nd = needs.get(l.item_id) || { item_id: l.item_id, name: l.name, unit: l.unit, unit_volume: n(l.unit_volume), ordered: 0, stock: stockOf.get(l.item_id) || 0, missing: 0, orders: [] };
-      nd.ordered += n(l.qty); nd.missing += l.missing;
+      nd.ordered += l.rest; nd.missing += l.missing;
       if (l.missing > 0) nd.orders.push(o.number);
       needs.set(l.item_id, nd);
     }
     o.ready = o.lines.every((l) => l.missing <= 0);
+    o.can_deliver = o.lines.some((l) => l.ready > 0);
   }
   const list = [...needs.values()].map((x) => ({ ...x, missing: Math.round(x.missing * 1000) / 1000, missing_l: x.unit_volume ? Math.round(x.missing * x.unit_volume * 1000) / 1000 : null }));
   return { orders, needs: list.sort((a, b) => b.missing - a.missing) };
@@ -137,6 +142,19 @@ export default handler(async (req, res, user) => {
     return out;
   }
 
+  // Clients qui doivent de l'argent (factures validées non soldées)
+  if (action === 'debts') {
+    if (!c('ventes')) fail('Accès refusé', 403);
+    const rows = await q(`SELECT cu.id, cu.name, cu.phone, cu.type, COUNT(d.id) AS invoices, SUM(d.total-d.paid) AS due, MIN(d.date) AS oldest,
+        (current_date - MIN(d.date)) AS days, MAX(d.date) AS last_date
+      FROM sales_docs d JOIN customers cu ON cu.id=d.customer_id
+      WHERE d.company_id=$1 AND d.type='facture' AND d.status IN ('valide','partiel') AND d.total-d.paid>0.5
+      GROUP BY cu.id ORDER BY SUM(d.total-d.paid) DESC`, [cid]);
+    const inv = rows.length ? await q(`SELECT id, number, date, total, paid, customer_id FROM sales_docs WHERE company_id=$1 AND type='facture' AND status IN ('valide','partiel') AND total-paid>0.5 ORDER BY date, id`, [cid]) : [];
+    for (const r of rows) r.list = inv.filter((x) => x.customer_id === r.id);
+    return rows;
+  }
+
   if (action === 'depots') {
     if (!c('ventes')) fail('Accès refusé', 403);
     const open = await q(`SELECT k.id,k.number,k.date,k.tier,k.notes,k.customer_id,cu.name AS seller,cu.phone,(current_date-k.date) AS days
@@ -166,6 +184,10 @@ export default handler(async (req, res, user) => {
         const late = o.days < 0;
         out.push({ level: late || !o.ready ? 'red' : 'orange', mod: 'ventes', title: late ? 'Commande en retard' : o.days === 0 ? 'Commande à livrer aujourd\'hui' : `Commande à livrer dans ${o.days} j`,
           text: `${o.number} — ${o.customer_name || 'client'}${o.ready ? ' · prête' : ' · stock insuffisant, à produire'}` });
+      }
+      if (c('ventes')) {
+        const old = await one(`SELECT COUNT(DISTINCT customer_id) AS n, COALESCE(SUM(total-paid),0) AS due FROM sales_docs WHERE company_id=$1 AND type='facture' AND status IN ('valide','partiel') AND total-paid>0.5 AND date < current_date - 30`, [cid]);
+        if (Number(old.n) > 0) out.push({ level: 'orange', mod: 'ventes', title: 'Dettes de plus de 30 jours', text: `${old.n} client(s) doivent ${Math.round(old.due).toLocaleString('fr-FR')} F — Ventes & Clients → Dettes clients` });
       }
       for (const nd of needs.filter((x) => x.missing > 0).slice(0, 3)) {
         out.push({ level: 'orange', mod: 'ventes', title: 'À produire pour les commandes', text: `${nd.name} : ${n(nd.missing)} ${nd.unit || ''}${nd.missing_l ? ` (${nd.missing_l} L)` : ''}` });

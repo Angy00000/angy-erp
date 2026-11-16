@@ -124,3 +124,41 @@ export function waLink(phone, text) {
   if (num.length === 9) num = '221' + num;
   return `https://wa.me/${num}${text ? `?text=${encodeURIComponent(text)}` : ''}`;
 }
+
+// ---------- Installer l'application sur le téléphone / l'ordinateur ----------
+export function InstallApp() {
+  const [evt, setEvt] = useState(null);
+  const [ios, setIos] = useState(false);
+  const [tip, setTip] = useState(false);
+  const [done, setDone] = useState(true);
+  useEffect(() => {
+    const standalone = window.matchMedia?.('(display-mode: standalone)').matches || window.navigator.standalone;
+    if (standalone) return;
+    setDone(false);
+    setIos(/iphone|ipad|ipod/i.test(navigator.userAgent));
+    const h = (e) => { e.preventDefault(); setEvt(e); };
+    window.addEventListener('beforeinstallprompt', h);
+    const ok = () => setDone(true);
+    window.addEventListener('appinstalled', ok);
+    return () => { window.removeEventListener('beforeinstallprompt', h); window.removeEventListener('appinstalled', ok); };
+  }, []);
+  if (done || (!evt && !ios)) return null;
+  const click = async () => {
+    if (evt) { evt.prompt(); const r = await evt.userChoice.catch(() => null); if (r?.outcome === 'accepted') setDone(true); setEvt(null); } else setTip(true);
+  };
+  return (
+    <>
+      <button className="install-btn" onClick={click}>📲 Installer l'application</button>
+      {tip && (
+        <Modal title="Installer ANGY ERP sur l'iPhone" onClose={() => setTip(false)} footer={<button className="btn primary" onClick={() => setTip(false)}>Compris</button>}>
+          <ol className="install-steps">
+            <li>Ouvrez ANGY ERP dans <b>Safari</b>.</li>
+            <li>Touchez le bouton <b>Partager</b> (le carré avec une flèche vers le haut).</li>
+            <li>Choisissez <b>« Sur l'écran d'accueil »</b>, puis <b>Ajouter</b>.</li>
+          </ol>
+          <p className="muted small">L'icône ANGY ERP apparaît sur votre écran : le logiciel s'ouvre comme une application.</p>
+        </Modal>
+      )}
+    </>
+  );
+}

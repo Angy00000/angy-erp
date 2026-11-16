@@ -14,7 +14,7 @@ import Rapports from '../../components/modules/Rapports';
 import Admin from '../../components/modules/Admin';
 import Aide from '../../components/modules/Aide';
 import Imprimes from '../../components/modules/Imprimes';
-import { SearchPalette, Bell, Announcements, PasswordModal, useTheme, waLink } from '../../components/Chrome';
+import { SearchPalette, Bell, Announcements, PasswordModal, useTheme, waLink, InstallApp } from '../../components/Chrome';
 
 const VIEWS = { dashboard: Dashboard, ventes: Ventes, caisse: Caisse, stock: Stock, achats: Achats, production: Production, qualite: Qualite, rh: RH, rapports: Rapports, admin: Admin, aide: Aide, imprimes: Imprimes };
 const SUBTITLES = {
@@ -88,6 +88,7 @@ export default function AppShell() {
             {!me.user.support && <button className="side-ic" title="Changer mon mot de passe" onClick={() => setPwd(true)}><Ic n="key" s={16} /></button>}
             <button className="side-ic" title="Se déconnecter" onClick={logout}><Ic n="logout" s={16} /></button>
           </div>
+          <InstallApp />
           <div className="side-sign">ANGY ERP · un produit Angy Company</div>
         </div>
       </aside>

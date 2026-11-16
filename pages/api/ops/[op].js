@@ -320,24 +320,86 @@ const OPS = {
     await t.q("UPDATE sales_docs SET status='transforme' WHERE id=$1", [doc.id]);
     return nd;
   }],
-  // Livrer une commande client : facture créée, stock déduit (lot choisi ou automatique), encaissement éventuel.
+  // Paiement d'un client qui doit de l'argent : réparti sur ses factures, les plus anciennes d'abord
+  customer_pay: [['ventes'], async (t, user, b) => {
+    let amount = r2(b.amount);
+    if (amount <= 0) fail('Montant invalide');
+    if (!b.account_id) fail('Choisissez où l\'argent est reçu');
+    const docs = await t.q(`SELECT * FROM sales_docs WHERE company_id=$1 AND customer_id=$2 AND type='facture' AND status IN ('valide','partiel') AND total>paid
+      ORDER BY date, id FOR UPDATE`, [user.cid, b.customer_id]);
+    const due = r2(docs.reduce((s, d) => s + n(d.total) - n(d.paid), 0));
+    if (!docs.length) fail('Ce client ne doit rien');
+    if (amount > due + 0.01) fail(`Le montant dépasse ce que le client doit (${due})`);
+    const done = [];
+    for (const d of docs) {
+      if (amount <= 0.009) break;
+      const part = Math.min(amount, r2(n(d.total) - n(d.paid)));
+      await payDoc(t, user, d, { amount: part, account_id: b.account_id, date: b.date, reference: b.reference });
+      done.push({ number: d.number, amount: part });
+      amount = r2(amount - part);
+    }
+    return { invoices: done, rest: r2(due - r2(b.amount)) };
+  }],
+  // Acompte reçu à la commande : l'argent entre en caisse, il sera déduit des factures de livraison
+  order_advance: [['ventes'], async (t, user, b) => {
+    const doc = await getDoc(t, user, b.id);
+    if (doc.type !== 'commande' || !['brouillon', 'valide'].includes(doc.status)) fail('Acompte possible seulement sur une commande en cours');
+    const amount = r2(b.amount);
+    if (amount <= 0) fail('Montant invalide');
+    if (n(doc.paid) + amount > n(doc.total) + 0.01) fail(`L'acompte dépasse le montant de la commande (${r2(n(doc.total) - n(doc.paid))} restant)`);
+    if (!b.account_id) fail('Choisissez où l\'argent est reçu');
+    await t.q(`INSERT INTO payments (company_id,direction,party_type,party_id,doc_type,doc_id,account_id,amount,date,method,reference,user_id)
+      VALUES ($1,'in','customer',$2,'sales_docs',$3,$4,$5,$6,$7,$8,$9)`, [user.cid, doc.customer_id, doc.id, b.account_id, amount, b.date || today(), b.method || null, 'Acompte', user.uid]);
+    await cashTx(t, user, { account_id: b.account_id, amount, category: 'Vente', label: `Acompte commande ${doc.number}`, ref_type: 'sales_docs', ref_id: doc.id, date: b.date });
+    await t.q('UPDATE sales_docs SET paid=paid+$1 WHERE id=$2', [amount, doc.id]);
+    return { ok: true };
+  }],
+  // Livrer une commande (en une ou plusieurs fois) : facture des quantités livrées, stock déduit, acompte déduit, encaissement éventuel.
   order_deliver: [['ventes'], async (t, user, b) => {
     const doc = await getDoc(t, user, b.id);
     if (doc.type !== 'commande' || !['brouillon', 'valide'].includes(doc.status)) fail('Seule une commande en cours peut être livrée');
+    const lines = await t.q('SELECT * FROM sales_lines WHERE doc_id=$1 ORDER BY id', [doc.id]);
+    const qtys = b.qtys || {};
     const lots = b.lots || {};
-    for (const [lineId, lotId] of Object.entries(lots)) {
-      if (lotId) await t.q('UPDATE sales_lines SET lot_id=$1 WHERE id=$2 AND doc_id=$3', [Number(lotId), Number(lineId), doc.id]);
+    const deliver = [];
+    for (const l of lines) {
+      const rest = Math.round((n(l.qty) - n(l.qty_delivered)) * 1000) / 1000;
+      const q = qtys[l.id] === undefined || qtys[l.id] === '' ? rest : n(qtys[l.id]);
+      if (q < 0 || q > rest + 1e-9) fail(`Quantité à livrer invalide (reste ${rest})`);
+      if (q > 0) deliver.push({ l, q });
     }
+    if (!deliver.length) fail('Indiquez au moins une quantité à livrer');
+    const sub = r2(deliver.reduce((s, { l, q }) => s + q * n(l.unit_price) - (n(l.qty) ? n(l.discount) * q / n(l.qty) : 0), 0));
+    const ratio = n(doc.subtotal) > 0 ? sub / n(doc.subtotal) : 1;
+    const disc = r2(n(doc.discount) * ratio), tax = r2(n(doc.tax) * ratio);
+    const total = r2(sub - disc + tax);
     const number = await nextNumber(t, user.cid, 'facture', 'FAC');
+    const remainingAfter = lines.some((l) => { const d = deliver.find((x) => x.l.id === l.id); return n(l.qty) - n(l.qty_delivered) - (d ? d.q : 0) > 1e-9; });
     const nd = await t.one(`INSERT INTO sales_docs (company_id,number,type,customer_id,date,due_date,status,subtotal,discount,tax,total,channel,parent_id,notes,user_id)
       VALUES ($1,$2,'facture',$3,$4,$5,'brouillon',$6,$7,$8,$9,$10,$11,$12,$13) RETURNING *`,
-      [user.cid, number, doc.customer_id, b.date || today(), doc.due_date, doc.subtotal, doc.discount, doc.tax, doc.total, doc.channel, doc.id, [doc.notes, `Livraison de la commande ${doc.number}`].filter(Boolean).join(' · '), user.uid]);
-    await t.q('INSERT INTO sales_lines (doc_id,item_id,description,qty,unit_price,discount,total,lot_id) SELECT $1,item_id,description,qty,unit_price,discount,total,lot_id FROM sales_lines WHERE doc_id=$2 ORDER BY id', [nd.id, doc.id]);
-    await t.q("UPDATE sales_docs SET status='transforme' WHERE id=$1", [doc.id]);
+      [user.cid, number, doc.customer_id, b.date || today(), doc.due_date, sub, disc, tax, total, doc.channel, doc.id,
+        [doc.notes, `${remainingAfter ? 'Livraison partielle' : 'Livraison'} de la commande ${doc.number}`].filter(Boolean).join(' · '), user.uid]);
+    for (const { l, q } of deliver) {
+      const ld = n(l.qty) ? r2(n(l.discount) * q / n(l.qty)) : 0;
+      await t.q('INSERT INTO sales_lines (doc_id,item_id,description,qty,unit_price,discount,total,lot_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)',
+        [nd.id, l.item_id, l.description, q, n(l.unit_price), ld, r2(q * n(l.unit_price) - ld), lots[l.id] ? Number(lots[l.id]) : l.lot_id]);
+      await t.q('UPDATE sales_lines SET qty_delivered=qty_delivered+$1 WHERE id=$2', [q, l.id]);
+    }
     const v = await validateSale(t, user, nd);
-    const paid = Math.min(r2(n(b.paid)), n(nd.total));
-    if (paid > 0) await payDoc(t, user, { ...nd, status: v.status, paid: 0 }, { amount: paid, account_id: b.account_id, date: b.date });
-    return { id: nd.id, number, total: nd.total };
+    // Acompte : déduit de cette facture (l'argent est déjà en caisse)
+    const avail = r2(n(doc.paid) - n(doc.advance_used));
+    const use = Math.min(avail, total);
+    let paidNow = 0;
+    if (use > 0.009) {
+      paidNow = use;
+      await t.q('UPDATE sales_docs SET paid=$1, status=$2, notes=COALESCE(notes,\'\')||$3 WHERE id=$4', [use, use >= total - 0.01 ? 'paye' : 'partiel', ` · Acompte de ${Math.round(use)} déduit`, nd.id]);
+      await t.q('UPDATE sales_docs SET advance_used=advance_used+$1 WHERE id=$2', [use, doc.id]);
+    }
+    const pay = Math.min(r2(n(b.paid)), r2(total - paidNow));
+    if (pay > 0) await payDoc(t, user, { ...nd, status: v.status, paid: paidNow }, { amount: pay, account_id: b.account_id, date: b.date });
+    if (!remainingAfter) await t.q("UPDATE sales_docs SET status='transforme' WHERE id=$1", [doc.id]);
+    else await t.q("UPDATE sales_docs SET status='valide' WHERE id=$1", [doc.id]);
+    return { id: nd.id, number, total, advance: paidNow, complete: !remainingAfter };
   }],
   // Vente comptoir en une étape : facture + sortie stock + encaissement
   pos_sale: [['ventes', 'caisse'], async (t, user, b) => {
