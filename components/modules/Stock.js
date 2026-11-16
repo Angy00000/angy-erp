@@ -4,6 +4,11 @@ import { Tabs, Badge, invalidateRefs } from '../ui';
 import CrudTable from '../CrudTable';
 import ActionModal from '../ActionModal';
 
+// Quels champs ont un sens selon le type d'article
+const SOLD = ['pf', 'service'];                       // vendus : prix de vente, code-barres
+const MADE = ['pf', 'semi_fini'];                     // fabriqués : contenance
+const BOUGHT = ['mp', 'emballage', 'consommable', 'materiel']; // achetés : prix d'achat
+const PERISH = ['mp', 'pf', 'semi_fini'];             // périssables : durée de conservation
 export const UNITS = ['unité', 'kg', 'g', 'L', 'mL', 'bouteille', 'pot', 'sachet', 'bidon', 'carton', 'pack', 'm', 'pièce'].map((u) => [u, u]);
 
 export default function Stock() {
@@ -54,18 +59,20 @@ function Items() {
           { k: 'stock', l: 'Stock', r: true, fmt: (r) => r.type === 'service' ? '—' : <span className={r.min_stock > 0 && r.stock < r.min_stock ? 'neg strong' : ''}>{num(r.stock)} {r.unit}</span>, csv: (r) => r.stock },
           { k: 'stock_blocked', l: 'Bloqué', r: true, fmt: (r) => (r.stock_blocked > 0 ? <span className="neg">{num(r.stock_blocked)}</span> : ''), csv: (r) => r.stock_blocked },
           { k: 'cost_price', l: 'Coût moyen', t: 'money' },
-          { k: 'sale_price', l: 'Prix vente', t: 'money' },
+          { k: 'sale_price', l: 'Prix vente', r: true, fmt: (r) => (SOLD.includes(r.type) ? money(r.sale_price) : <span className="muted">—</span>), csv: (r) => (SOLD.includes(r.type) ? r.sale_price : '') },
           { k: 'value', l: 'Valeur stock', r: true, fmt: (r) => money(r.stock * r.cost_price), csv: (r) => Math.round(r.stock * r.cost_price) },
         ]}
         defaults={{ type: 'pf', unit: 'unité', active: true }}
         fields={[
           { k: 'name', l: 'Désignation', req: true }, { k: 'code', l: 'Code / référence' },
           { k: 'type', l: 'Type', t: 'select', opts: opts('item_type'), req: true }, { k: 'category_id', l: 'Catégorie', t: 'ref', ref: 'categories' },
-          { k: 'unit', l: 'Unité', t: 'select', opts: UNITS }, { k: 'unit_volume', l: 'Contenance par unité (litres)', t: 'number', help: 'Ex. 0,125 pour un sachet de 12,5 cl · 1 pour une bouteille d\'1 L' },
-          { k: 'barcode', l: 'Code-barres' },
-          { k: 'purchase_price', l: 'Prix d\'achat', t: 'number' }, { k: 'cost_price', l: 'Coût de revient moyen', t: 'number', help: 'Mis à jour automatiquement à chaque entrée' },
-          { k: 'sale_price', l: 'Prix de vente détail', t: 'number' }, { k: 'wholesale_price', l: 'Prix de vente gros', t: 'number' },
-          { k: 'min_stock', l: 'Stock minimum (alerte)', t: 'number' }, { k: 'shelf_life_days', l: 'Durée de vie (jours)', t: 'number', help: 'Sert à calculer la DLC des lots' },
+          { k: 'unit', l: 'Unité', t: 'select', opts: UNITS, help: 'Matières : kg · Emballages, consommables, matériel : pièce · Jus : sachet ou bouteille' },
+          { k: 'unit_volume', l: 'Contenance par unité (litres)', t: 'number', help: 'Ex. 0,125 pour un sachet de 12,5 cl · 1 pour une bouteille d\'1 L', show: (d) => MADE.includes(d.type) },
+          { k: 'barcode', l: 'Code-barres', show: (d) => SOLD.includes(d.type) },
+          { k: 'purchase_price', l: 'Prix d\'achat habituel', t: 'number', help: 'Indicatif : le coût réel se met à jour tout seul à chaque Entrée stock', show: (d) => BOUGHT.includes(d.type) },
+          { k: 'sale_price', l: 'Prix de vente détail', t: 'number', show: (d) => SOLD.includes(d.type) }, { k: 'wholesale_price', l: 'Prix de vente gros', t: 'number', show: (d) => SOLD.includes(d.type) },
+          { k: 'min_stock', l: 'Stock minimum (alerte)', t: 'number', help: 'Le logiciel prévient quand il en reste moins', show: (d) => d.type !== 'service' && d.type !== 'materiel' },
+          { k: 'shelf_life_days', l: 'Durée de conservation (jours)', t: 'number', help: 'Sert à calculer la date limite des lots', show: (d) => PERISH.includes(d.type) },
           { k: 'description', l: 'Description / spécifications', t: 'textarea', full: true }, { k: 'active', l: 'Article actif', t: 'bool' },
         ]}
       />
