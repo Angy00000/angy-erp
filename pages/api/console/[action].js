@@ -4,6 +4,7 @@ import { SignJWT, jwtVerify } from 'jose';
 import { fail, signToken, setAuthCookie, n } from '../../../lib/api';
 import { q, one, tx } from '../../../lib/db';
 import { seedCompany } from '../../../lib/seed';
+import { getSettings, saveSettings } from '../../../lib/platform';
 
 // Console Angy Company : gestion des entreprises clientes de la plateforme.
 // Session séparée (cookie pa_token), réservée à l'équipe Angy Company.
@@ -39,8 +40,9 @@ export default async function consoleApi(req, res) {
       if (req.method !== 'POST') fail('Méthode non supportée', 405);
       const a = await one('SELECT * FROM platform_admins WHERE email=$1', [String(b.email || '').trim().toLowerCase()]);
       if (!a || !(await bcrypt.compare(String(b.password || ''), a.password_hash))) fail('Email ou mot de passe incorrect', 401);
+      if (a.active === false) fail('Compte désactivé', 403);
       await q('UPDATE platform_admins SET last_login=now() WHERE id=$1', [a.id]);
-      setPa(res, await new SignJWT({ aid: a.id, name: a.name }).setProtectedHeader({ alg: 'HS256' }).setExpirationTime('2d').sign(secret));
+      setPa(res, await new SignJWT({ aid: a.id, name: a.name, role: a.role || 'proprietaire' }).setProtectedHeader({ alg: 'HS256' }).setExpirationTime('2d').sign(secret));
       await log(a, 'connexion');
       return res.json({ ok: true });
     }
@@ -49,6 +51,10 @@ export default async function consoleApi(req, res) {
     let admin;
     try { admin = (await jwtVerify(req.cookies?.pa_token || '', secret)).payload; } catch { fail('Connexion requise', 401); }
 
+    const cur = await one('SELECT id, name, email, role, active FROM platform_admins WHERE id=$1', [admin.aid]);
+    if (!cur || cur.active === false) { setPa(res, '', 0); fail('Connexion requise', 401); }
+    admin = { ...admin, name: cur.name, role: cur.role || 'proprietaire', email: cur.email };
+    const owner = () => { if (admin.role !== 'proprietaire') fail('Réservé au propriétaire de la console', 403); };
     const id = parseInt(b.id ?? req.query.id, 10);
     const getCompany = async () => { const c = await one(`${COMPANY_SELECT} WHERE c.id=$1`, [id]); if (!c) fail('Entreprise introuvable', 404); return c; };
 
@@ -115,15 +121,33 @@ export default async function consoleApi(req, res) {
         const amount = n(b.amount);
         if (amount <= 0) fail('Montant invalide');
         const newEnd = b.new_end || null;
-        await tx(async (t) => {
-          await t.q('INSERT INTO subscription_payments (company_id,amount,date,method,period_label,new_end,note) VALUES ($1,$2,$3,$4,$5,$6,$7)',
-            [id, amount, b.date || new Date().toISOString().slice(0, 10), b.method || null, b.period_label || null, newEnd, b.note || null]);
+        const pid = await tx(async (t) => {
+          await t.q('LOCK TABLE subscription_payments IN SHARE ROW EXCLUSIVE MODE');
+          const year = String(b.date || new Date().toISOString()).slice(0, 4);
+          const last = await t.one("SELECT COALESCE(MAX(substring(number from 11)::int),0) AS c FROM subscription_payments WHERE number LIKE $1", [`ANGY-${year}-%`]);
+          const number = `ANGY-${year}-${String(Number(last.c) + 1).padStart(4, '0')}`;
+          const r = await t.one('INSERT INTO subscription_payments (company_id,amount,date,method,period_label,new_end,note,number,admin_name) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id',
+            [id, amount, b.date || new Date().toISOString().slice(0, 10), b.method || null, b.period_label || null, newEnd, b.note || null, number, admin.name]);
           if (newEnd) await t.q("UPDATE companies SET sub_end=$1, status='actif' WHERE id=$2", [newEnd, id]);
+          return r.id;
         });
         await log(admin, 'paiement enregistré', id, { name: c.name, amount });
-        return res.json(await getCompany());
+        return res.json({ ...(await getCompany()), payment_id: pid });
       }
-      case 'payments': return res.json(await q('SELECT s.*, c.name AS company FROM subscription_payments s JOIN companies c ON c.id=s.company_id ORDER BY s.date DESC, s.id DESC LIMIT 300'));
+      case 'payments': return res.json(await q('SELECT s.*, c.name AS company, c.phone AS company_phone FROM subscription_payments s JOIN companies c ON c.id=s.company_id ORDER BY s.date DESC, s.id DESC LIMIT 300'));
+      case 'receipt': {
+        const p = await one(`SELECT s.*, c.name AS company, c.phone AS company_phone, c.address AS company_address, c.contact_name FROM subscription_payments s
+          JOIN companies c ON c.id=s.company_id WHERE s.id=$1`, [id]);
+        if (!p) fail('Reçu introuvable', 404);
+        return res.json({ ...p, angy: await getSettings() });
+      }
+      case 'payment_delete': {
+        owner();
+        const p = await one('DELETE FROM subscription_payments WHERE id=$1 RETURNING company_id, amount, number', [id]);
+        if (!p) fail('Paiement introuvable', 404);
+        await log(admin, 'paiement supprimé', p.company_id, { number: p.number, amount: p.amount });
+        return res.json({ ok: true });
+      }
 
       case 'reset_password': {
         const c = await getCompany();
@@ -163,6 +187,36 @@ export default async function consoleApi(req, res) {
         return res.json({ ok: true });
       }
       case 'announcement_delete': { await q('DELETE FROM announcements WHERE id=$1', [id]); await log(admin, 'annonce supprimée'); return res.json({ ok: true }); }
+
+      case 'settings': return res.json(await getSettings());
+      case 'settings_save': { owner(); const v = await saveSettings(b); await log(admin, 'réglages modifiés'); return res.json(v); }
+
+      case 'team': return res.json(await q('SELECT id, name, email, role, active, last_login, created_at FROM platform_admins ORDER BY id'));
+      case 'team_save': {
+        owner();
+        const email = String(b.email || '').trim().toLowerCase();
+        const role = b.role === 'membre' ? 'membre' : 'proprietaire';
+        if (b.id) {
+          if (Number(b.id) === admin.aid && (role !== 'proprietaire' || b.active === false)) fail('Vous ne pouvez pas retirer vos propres droits');
+          await q('UPDATE platform_admins SET name=$2, role=$3, active=$4 WHERE id=$1', [b.id, b.name, role, b.active !== false]);
+          await log(admin, 'membre modifié', null, { name: b.name });
+          return res.json({ ok: true });
+        }
+        if (!b.name || !email) fail('Nom et email requis');
+        const password = genPassword();
+        await q('INSERT INTO platform_admins (name,email,password_hash,role) VALUES ($1,$2,$3,$4)', [b.name, email, await bcrypt.hash(password, 10), role]);
+        await log(admin, 'membre ajouté', null, { name: b.name, email });
+        return res.json({ email, password, name: b.name });
+      }
+      case 'team_reset': {
+        owner();
+        const a = await one('SELECT id, email, name FROM platform_admins WHERE id=$1', [id]);
+        if (!a) fail('Membre introuvable', 404);
+        const password = genPassword();
+        await q('UPDATE platform_admins SET password_hash=$1 WHERE id=$2', [await bcrypt.hash(password, 10), a.id]);
+        await log(admin, 'mot de passe membre réinitialisé', null, { email: a.email });
+        return res.json({ email: a.email, name: a.name, password });
+      }
 
       case 'logs': return res.json(await q('SELECT l.*, c.name AS company FROM platform_logs l LEFT JOIN companies c ON c.id=l.company_id ORDER BY l.created_at DESC LIMIT 300'));
 

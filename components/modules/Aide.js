@@ -2,7 +2,6 @@ import { useState } from 'react';
 import { api, datetime } from '../../lib/client';
 import { useData, toast } from '../ui';
 import { Ic } from './Dashboard';
-import { SUPPORT } from '../../lib/support';
 import { waLink } from '../Chrome';
 
 export const REQ_TYPES = { probleme: ['Un problème', 'red'], suggestion: ['Une suggestion', 'blue'], question: ['Une question', 'amber'] };
@@ -15,10 +14,13 @@ const GUIDE = [
   ['Voir le bénéfice d\'une production', 'Production → Rentabilité par production → Détail.'],
   ['Déclarer une perte ou casse', 'Stock & Articles → ⬆ Sortie / perte → motif « Perte » ou « Casse ».'],
   ['Ajouter un employé au logiciel', 'Administration → Utilisateurs & rôles → + Nouvel utilisateur, en choisissant son rôle.'],
+  ['Imprimer une fiche vierge', 'Imprimés & fiches → choisir la fiche (production, hygiène, stock, caisse…) → Imprimer. Votre logo apparaît automatiquement.'],
+  ['Ajouter le logo de l\'entreprise', 'Administration → Entreprise → Ajouter un logo → Enregistrer.'],
   ['Rechercher rapidement', 'Appuyez sur Ctrl + K (ou la barre « Rechercher » en haut) pour trouver un produit, un client, une facture ou un lot.'],
 ];
 
-export default function Aide() {
+export default function Aide({ contact }) {
+  const ct = contact || {};
   const { data, reload } = useData(() => api('app/support'), []);
   const [v, setV] = useState({ type: 'probleme', message: '' });
   const [busy, setBusy] = useState(false);
@@ -67,8 +69,14 @@ export default function Aide() {
             <details key={t} className="guide"><summary>{t}</summary><p>{d}</p></details>
           ))}
         </div>
-        {SUPPORT.whatsapp && <a className="panel wa" href={waLink(SUPPORT.whatsapp, 'Bonjour Angy Company, j\'ai besoin d\'aide sur ANGY ERP.')} target="_blank" rel="noreferrer">
-          <Ic n="whatsapp" s={22} /><span><b>Écrire sur WhatsApp</b><small>Réponse rapide de l'équipe Angy Company</small></span></a>}
+        {ct.whatsapp && <a className="panel wa" href={waLink(ct.whatsapp, 'Bonjour Angy Company, j\'ai besoin d\'aide sur ANGY ERP.')} target="_blank" rel="noreferrer">
+          <Ic n="whatsapp" s={22} /><span><b>Écrire sur WhatsApp</b><small>Réponse rapide de l'équipe Angy Company · {ct.whatsapp}</small></span></a>}
+        {(ct.telephone || ct.email) && <div className="panel" style={{ marginTop: 14 }}>
+          <div className="panel-h"><span className="panel-ic"><Ic n="phone" s={16} /></span><h3>Contacter Angy Company</h3></div>
+          {ct.telephone && <p style={{ margin: '4px 0' }}>Téléphone : <a href={'tel:' + ct.telephone.replace(/\s/g, '')}><b>{ct.telephone}</b></a></p>}
+          {ct.email && <p style={{ margin: '4px 0' }}>Email : <a href={'mailto:' + ct.email}><b>{ct.email}</b></a></p>}
+          {ct.adresse && <p className="muted small" style={{ margin: '4px 0' }}>{ct.adresse}</p>}
+        </div>}
       </div>
     </div>
   );

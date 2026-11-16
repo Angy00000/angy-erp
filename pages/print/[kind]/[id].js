@@ -38,12 +38,16 @@ export default function PrintDoc() {
   const { company: c, doc: d } = data;
   const Header = ({ title, right }) => (
     <div style={S.head}>
-      <div>
+      <div style={{ display: 'flex', gap: 14, alignItems: 'flex-start' }}>
+        {c.logo && <img src={c.logo} alt="" style={{ width: 72, height: 72, objectFit: 'contain' }} />}
+        <div>
         <div style={S.h}>{c.name}</div>
+        {c.slogan && <div style={{ fontStyle: 'italic', color: '#4b5a52' }}>{c.slogan}</div>}
         <div style={{ color: '#4b5a52', marginTop: 4, lineHeight: 1.5 }}>
           {c.sector && <div>{c.sector}</div>}{c.address && <div>{c.address}</div>}
           {(c.phone || c.email) && <div>{[c.phone, c.email].filter(Boolean).join(' · ')}</div>}
           {(c.ninea || c.rccm) && <div>{c.ninea && 'NINEA ' + c.ninea} {c.rccm && ' · RCCM ' + c.rccm}</div>}
+        </div>
         </div>
       </div>
       <div style={{ textAlign: 'right' }}>

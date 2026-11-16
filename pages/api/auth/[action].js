@@ -2,8 +2,7 @@ import bcrypt from 'bcryptjs';
 import { handler, fail, signToken, verifyToken, setAuthCookie, clearAuthCookie, audit, companyBlock } from '../../../lib/api';
 import { q, one, tx } from '../../../lib/db';
 import { seedCompany } from '../../../lib/seed';
-
-export const TRIAL_DAYS = 30;
+import { getSettings, getContact } from '../../../lib/platform';
 
 export default handler(async (req, res) => {
   const { action } = req.query;
@@ -13,11 +12,13 @@ export default handler(async (req, res) => {
     if (!p) fail('Non connecté', 401);
     const u = await one('SELECT id,name,email,role,active FROM users WHERE id=$1', [p.uid]);
     if (!u || (!u.active && !p.support)) fail('Compte désactivé', 401);
-    const company = await one(`SELECT id,name,sector,currency,address,phone,email,ninea,rccm,tax_rate,invoice_footer,status,sub_end,
+    const company = await one(`SELECT id,name,sector,currency,address,phone,email,ninea,rccm,tax_rate,invoice_footer,status,sub_end,logo,city,slogan,
       (sub_end - current_date) AS days_left FROM companies WHERE id=$1`, [p.cid]);
     const blocked = p.support ? null : await companyBlock(p.cid);
-    return { user: { ...u, cid: p.cid, support: !!p.support }, company, blocked };
+    return { user: { ...u, cid: p.cid, support: !!p.support }, company, blocked, contact: await getContact() };
   }
+
+  if (action === 'contact') return { ...(await getContact()), essai_jours: (await getSettings()).essai_jours };
 
   if (action === 'logout') {
     clearAuthCookie(res);
@@ -47,9 +48,10 @@ export default handler(async (req, res) => {
     if (!b.password || b.password.length < 6) fail('Mot de passe de 6 caractères minimum');
     if (await one('SELECT id FROM users WHERE email=$1', [email])) fail('Un compte existe déjà avec cet email');
     const hash = await bcrypt.hash(b.password, 10);
+    const trial = (await getSettings()).essai_jours;
     const payload = await tx(async (t) => {
-      const c = await t.one(`INSERT INTO companies (name,sector,phone,address,contact_name,status,sub_end) VALUES ($1,$2,$3,$4,$5,'essai',current_date + ${TRIAL_DAYS}) RETURNING id`,
-        [b.company, b.sector || null, b.phone || null, b.address || null, b.name]);
+      const c = await t.one(`INSERT INTO companies (name,sector,phone,address,contact_name,status,sub_end) VALUES ($1,$2,$3,$4,$5,'essai',CASE WHEN $6::int > 0 THEN current_date + $6::int END) RETURNING id`,
+        [b.company, b.sector || null, b.phone || null, b.address || null, b.name, trial]);
       const u = await t.one("INSERT INTO users (company_id,name,email,password_hash,role) VALUES ($1,$2,$3,$4,'admin') RETURNING id", [c.id, b.name, email, hash]);
       const p = { uid: u.id, cid: c.id, role: 'admin', name: b.name };
       await seedCompany(t, p, !!b.demo);

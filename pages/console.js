@@ -15,6 +15,7 @@ async function call(action, body, params) {
 }
 const STATUS = { essai: ['Essai', 'amber'], actif: ['Actif', 'green'], suspendu: ['Suspendu', 'red'] };
 const PERIOD = { mois: 'par mois', trimestre: 'par trimestre', annee: 'par an' };
+const PAY_MODES = { wave: 'Wave', orange_money: 'Orange Money', especes: 'Espèces', virement: 'Virement', autre: 'Autre' };
 const addMonths = (iso, m) => { const d = new Date((iso || today()) + 'T00:00:00Z'); d.setUTCMonth(d.getUTCMonth() + m); return d.toISOString().slice(0, 10); };
 const since = (d) => { if (!d) return 'jamais'; const m = Math.round((Date.now() - Date.parse(d)) / 60000); if (m < 60) return `il y a ${Math.max(1, m)} min`; if (m < 1440) return `il y a ${Math.round(m / 60)} h`; return `il y a ${Math.round(m / 1440)} j`; };
 
@@ -60,7 +61,7 @@ function Login({ onOk }) {
   );
 }
 
-const NAV = [['vue', 'Vue d\'ensemble', 'trend'], ['entreprises', 'Entreprises', 'factory'], ['abonnements', 'Abonnements', 'coins'], ['demandes', 'Demandes d\'aide', 'help'], ['annonces', 'Annonces', 'megaphone'], ['journal', 'Journal', 'clock'], ['compte', 'Mon compte', 'key']];
+const NAV = [['vue', 'Vue d\'ensemble', 'trend'], ['entreprises', 'Entreprises', 'factory'], ['abonnements', 'Abonnements', 'coins'], ['demandes', 'Demandes d\'aide', 'help'], ['annonces', 'Annonces', 'megaphone'], ['equipe', 'Équipe', 'users'], ['reglages', 'Réglages', 'gear'], ['journal', 'Journal', 'clock'], ['compte', 'Mon compte', 'key']];
 
 function ConsoleApp({ admin, onLogout }) {
   const [tab, setTab] = useState('vue');
@@ -80,11 +81,13 @@ function ConsoleApp({ admin, onLogout }) {
           <div className="page-head"><div><h1>{NAV.find((x) => x[0] === tab)?.[1]}</h1></div></div>
           {tab === 'vue' && <Vue go={go} />}
           {tab === 'entreprises' && <Companies focus={focus} />}
-          {tab === 'abonnements' && <Payments />}
+          {tab === 'abonnements' && <Payments go={go} />}
           {tab === 'demandes' && <Requests />}
           {tab === 'annonces' && <Annonces />}
+          {tab === 'equipe' && <Team admin={admin} />}
+          {tab === 'reglages' && <Settings admin={admin} />}
           {tab === 'journal' && <Journal />}
-          {tab === 'compte' && <Account />}
+          {tab === 'compte' && <Account admin={admin} />}
         </div>
       </div>
       {open && <div className="side-ov" onClick={() => setOpen(false)} />}
@@ -251,9 +254,9 @@ function ManageCompany({ c, onClose, onCreds }) {
       </>}
       {tab === 'pay' && <>
         <div className="note" style={{ marginBottom: 12 }}>Enregistrer un paiement prolonge l'abonnement jusqu'à la nouvelle date et passe l'entreprise en « Actif ».</div>
-        <Form data={pay} setData={setPay} fields={[{ k: 'amount', l: 'Montant reçu (FCFA)', t: 'number', req: true }, { k: 'date', l: 'Date', t: 'date' }, { k: 'method', l: 'Mode', t: 'select', opts: [['wave', 'Wave'], ['orange_money', 'Orange Money'], ['especes', 'Espèces'], ['virement', 'Virement'], ['autre', 'Autre']] },
+        <Form data={pay} setData={setPay} fields={[{ k: 'amount', l: 'Montant reçu (FCFA)', t: 'number', req: true }, { k: 'date', l: 'Date', t: 'date' }, { k: 'method', l: 'Mode', t: 'select', opts: Object.entries(PAY_MODES) },
           { k: 'new_end', l: 'Nouvelle fin d\'abonnement', t: 'date' }, { k: 'period_label', l: 'Période payée', ph: 'Ex. Décembre 2026' }, { k: 'note', l: 'Note' }]} />
-        <div className="row" style={{ justifyContent: 'flex-end', marginTop: 14 }}><button className="btn primary" disabled={busy} onClick={() => run(() => call('payment', { id: c.id, ...pay }), 'Paiement enregistré')}>Enregistrer le paiement</button></div>
+        <div className="row" style={{ justifyContent: 'flex-end', marginTop: 14 }}><button className="btn primary" disabled={busy} onClick={() => run(() => call('payment', { id: c.id, ...pay }), 'Paiement enregistré — reçu ouvert').then((r) => r?.payment_id && window.open('/recu-abonnement/' + r.payment_id, '_blank'))}>Enregistrer et imprimer le reçu</button></div>
       </>}
       {tab === 'acces' && <>
         <table className="t"><thead><tr><th>Utilisateur</th><th>Rôle</th><th>Dernière connexion</th><th /></tr></thead>
@@ -267,17 +270,45 @@ function ManageCompany({ c, onClose, onCreds }) {
   );
 }
 
-function Payments() {
-  const { data, err } = useCall('payments');
+const relanceText = (c) => c.days_left < 0
+  ? `Bonjour ${c.contact_name || ''}, ici Angy Company. L'abonnement ANGY ERP de ${c.name} a expiré le ${date(c.sub_end)}. Pour retrouver l'accès, merci de procéder au renouvellement${Number(c.price) ? ` (${money(c.price)} ${PERIOD[c.periodicity] || ''})` : ''}. Merci de votre confiance !`
+  : `Bonjour ${c.contact_name || ''}, ici Angy Company. ${c.status === 'essai' ? 'La période d\'essai' : 'L\'abonnement'} ANGY ERP de ${c.name} se termine le ${date(c.sub_end)} (dans ${c.days_left} jour(s)). Pour continuer sans interruption, merci de procéder au renouvellement${Number(c.price) ? ` (${money(c.price)} ${PERIOD[c.periodicity] || ''})` : ''}. Merci de votre confiance !`;
+
+function Payments({ go }) {
+  const { data, err, reload } = useCall('payments');
+  const { data: comps } = useCall('companies');
+  const [mode, setMode] = useState('');
   if (err) return <div className="err">{err}</div>;
   if (!data) return <div className="spinner">Chargement…</div>;
-  const total = data.reduce((s, p) => s + Number(p.amount), 0);
+  const rows = data.filter((p) => !mode || p.method === mode);
+  const total = rows.reduce((s, p) => s + Number(p.amount), 0);
+  const due = (comps || []).filter((c) => c.status !== 'suspendu' && c.sub_end && c.days_left <= 7).sort((a, b) => a.days_left - b.days_left);
+  const del = async (p) => { if (!window.confirm(`Supprimer le paiement ${p.number || ''} de ${p.company} ? (l'échéance de l'entreprise n'est pas modifiée)`)) return; try { await call('payment_delete', { id: p.id }); toast('Paiement supprimé'); reload(); } catch (e) { toast(e.message, 'error'); } };
   return (
-    <div className="card"><div className="table-wrap"><table className="t">
-      <thead><tr><th>Date</th><th>Entreprise</th><th>Période</th><th>Mode</th><th>Nouvelle échéance</th><th className="r">Montant</th></tr></thead>
-      <tbody>{data.map((p) => <tr key={p.id}><td>{date(p.date)}</td><td><b>{p.company}</b></td><td>{p.period_label}</td><td>{p.method}</td><td>{date(p.new_end)}</td><td className="r">{money(p.amount)}</td></tr>)}</tbody>
-      {data.length > 0 && <tfoot><tr><td>Total</td><td /><td /><td /><td /><td className="r">{money(total)}</td></tr></tfoot>}
-    </table>{!data.length && <div className="empty">Aucun paiement enregistré. Ouvrez une entreprise → « Paiement / prolongation ».</div>}</div></div>
+    <>
+      <div className="panel" style={{ marginBottom: 16 }}>
+        <div className="panel-h"><span className="panel-ic"><Ic n="bell" s={16} /></span><h3>À relancer ({due.length})</h3><span className="muted small">abonnements expirés ou se terminant dans 7 jours</span></div>
+        {!due.length && <div className="empty-s ok">Aucune échéance proche 👌</div>}
+        {due.map((c) => (
+          <div key={c.id} className="watch">
+            <span className={'dot ' + (c.days_left < 0 ? 'red' : 'orange')} />
+            <span className="w-n">{c.name}<small>{c.days_left < 0 ? `expiré depuis ${-c.days_left} j` : `fin dans ${c.days_left} j`} · {date(c.sub_end)}{Number(c.price) ? ` · ${money(c.price)} ${PERIOD[c.periodicity] || ''}` : ''}{c.phone ? ` · ${c.phone}` : ' · pas de téléphone'}</small></span>
+            {c.phone && <a className="btn sm" href={waLink(c.phone, relanceText(c))} target="_blank" rel="noreferrer"><Ic n="whatsapp" s={14} /> Relancer</a>}
+            <button className="btn sm primary" onClick={() => go('entreprises', c.id)}>Encaisser</button>
+          </div>
+        ))}
+      </div>
+      <div className="toolbar">
+        <select className="input sm" value={mode} onChange={(e) => setMode(e.target.value)}><option value="">Tous les modes</option>{Object.entries(PAY_MODES).map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select>
+        <div className="grow" /><span className="muted small">{rows.length} paiement(s) · {money(total)}</span>
+      </div>
+      <div className="card"><div className="table-wrap"><table className="t">
+        <thead><tr><th>Reçu</th><th>Date</th><th>Entreprise</th><th>Période</th><th>Mode</th><th>Nouvelle échéance</th><th className="r">Montant</th><th /></tr></thead>
+        <tbody>{rows.map((p) => <tr key={p.id}><td className="mono small">{p.number || '—'}</td><td>{date(p.date)}</td><td><b>{p.company}</b></td><td>{p.period_label}</td><td>{PAY_MODES[p.method] || p.method}</td><td>{date(p.new_end)}</td><td className="r">{money(p.amount)}</td>
+          <td className="actions"><a className="btn sm" href={'/recu-abonnement/' + p.id} target="_blank" rel="noreferrer"><Ic n="print" s={14} /> Reçu</a><button className="btn sm danger" title="Supprimer" onClick={() => del(p)}>✕</button></td></tr>)}</tbody>
+        {rows.length > 0 && <tfoot><tr><td>Total</td><td /><td /><td /><td /><td /><td className="r">{money(total)}</td><td /></tr></tfoot>}
+      </table>{!rows.length && <div className="empty">Aucun paiement enregistré. Ouvrez une entreprise → « Paiement / prolongation ».</div>}</div></div>
+    </>
   );
 }
 
@@ -337,13 +368,77 @@ function Journal() {
     <tbody>{data.map((l) => <tr key={l.id}><td>{datetime(l.created_at)}</td><td>{l.admin_name}</td><td>{l.action}</td><td>{l.company || (l.data?.name) || ''}</td></tr>)}</tbody></table></div></div>;
 }
 
-function Account() {
+function Account({ admin }) {
   const [d, setD] = useState({});
   return (
     <div className="panel" style={{ maxWidth: 520 }}>
       <div className="panel-h"><span className="panel-ic"><Ic n="key" s={16} /></span><h3>Changer le mot de passe de la console</h3></div>
+      <p className="muted small" style={{ marginTop: 0 }}>Connecté : <b>{admin?.name}</b> · {admin?.role === 'membre' ? 'Membre' : 'Propriétaire'}</p>
       <Form data={d} setData={setD} fields={[{ k: 'current', l: 'Mot de passe actuel', t: 'password', full: true }, { k: 'next', l: 'Nouveau mot de passe (8 caractères min.)', t: 'password', full: true }]} />
       <div className="row" style={{ justifyContent: 'flex-end', marginTop: 14 }}><button className="btn primary" onClick={async () => { try { await call('password', d); toast('Mot de passe modifié'); setD({}); } catch (e) { toast(e.message, 'error'); } }}>Enregistrer</button></div>
+    </div>
+  );
+}
+
+const ROLE_L = { proprietaire: ['Propriétaire', 'green'], membre: ['Membre', 'blue'] };
+function Team({ admin }) {
+  const { data, err, reload } = useCall('team');
+  const [edit, setEdit] = useState(null);
+  const [creds, setCreds] = useState(null);
+  const isOwner = admin?.role !== 'membre';
+  if (err) return <div className="err">{err}</div>;
+  if (!data) return <div className="spinner">Chargement…</div>;
+  const save = async () => { try { const r = await call('team_save', edit); setEdit(null); reload(); if (r.password) setCreds(r); else toast('Enregistré'); } catch (e) { toast(e.message, 'error'); } };
+  const credText = creds && `Bonjour ${creds.name},\n\nVoici ton accès à la console Angy Company (ANGY ERP) :\nLien : ${typeof window !== 'undefined' ? window.location.origin : ''}/console\nEmail : ${creds.email}\nMot de passe provisoire : ${creds.password}\n\nChange-le dans « Mon compte » dès la première connexion.`;
+  return (
+    <>
+      <div className="toolbar"><span className="muted small">Le <b>propriétaire</b> a tous les droits. Un <b>membre</b> gère les entreprises, paiements, demandes et annonces, mais ne touche ni à l'équipe ni aux réglages.</span><div className="grow" />
+        {isOwner && <button className="btn primary" onClick={() => setEdit({ role: 'membre', active: true })}>+ Ajouter un membre</button>}</div>
+      <div className="card"><div className="table-wrap"><table className="t">
+        <thead><tr><th>Membre</th><th>Rôle</th><th>Statut</th><th>Dernière connexion</th><th /></tr></thead>
+        <tbody>{data.map((a) => <tr key={a.id}><td><b>{a.name}</b>{a.id === admin?.aid && <span className="muted small"> (vous)</span>}<br /><span className="muted small">{a.email}</span></td>
+          <td><span className={'badge ' + (ROLE_L[a.role] || ROLE_L.proprietaire)[1]}>{(ROLE_L[a.role] || ROLE_L.proprietaire)[0]}</span></td>
+          <td>{a.active === false ? <span className="badge red">Désactivé</span> : <span className="badge green">Actif</span>}</td>
+          <td className="small">{a.last_login ? datetime(a.last_login) : 'jamais'}</td>
+          <td className="actions">{isOwner && <><button className="btn sm" onClick={() => setEdit({ ...a })}>Modifier</button>
+            {a.id !== admin?.aid && <button className="btn sm" onClick={async () => { if (!window.confirm(`Nouveau mot de passe pour ${a.email} ?`)) return; try { setCreds(await call('team_reset', { id: a.id })); } catch (e) { toast(e.message, 'error'); } }}>Nouveau mot de passe</button>}</>}</td></tr>)}</tbody>
+      </table></div></div>
+      {edit && <Modal title={edit.id ? 'Modifier le membre' : 'Nouveau membre'} onClose={() => setEdit(null)} footer={<><button className="btn" onClick={() => setEdit(null)}>Annuler</button><button className="btn primary" onClick={save}>{edit.id ? 'Enregistrer' : 'Créer l\'accès'}</button></>}>
+        <Form data={edit} setData={setEdit} fields={[{ k: 'name', l: 'Nom complet', req: true, full: true }, ...(edit.id ? [] : [{ k: 'email', l: 'Email (identifiant)', t: 'email', req: true, full: true }]),
+          { k: 'role', l: 'Rôle', t: 'select', opts: Object.entries(ROLE_L).map(([k, [l]]) => [k, l]), req: true }, ...(edit.id ? [{ k: 'active', l: 'Accès actif', t: 'bool' }] : [])]} />
+        {!edit.id && <p className="muted small">Un mot de passe provisoire sera généré.</p>}
+      </Modal>}
+      {creds && <Modal title="Accès console" onClose={() => setCreds(null)} footer={<><button className="btn" onClick={() => { navigator.clipboard?.writeText(credText); toast('Copié'); }}>Copier le message</button><button className="btn primary" onClick={() => setCreds(null)}>Fermer</button></>}>
+        <div className="note" style={{ marginBottom: 12 }}>Notez ce mot de passe maintenant : il ne pourra plus être affiché ensuite.</div>
+        <dl className="kv"><dt>Email</dt><dd className="mono strong">{creds.email}</dd><dt>Mot de passe</dt><dd className="mono strong" style={{ fontSize: 18 }}>{creds.password}</dd></dl>
+        <textarea className="input" readOnly value={credText} style={{ marginTop: 14, minHeight: 150 }} />
+      </Modal>}
+    </>
+  );
+}
+
+function Settings({ admin }) {
+  const { data, err } = useCall('settings');
+  const [d, setD] = useState(null);
+  useEffect(() => { if (data) setD(data); }, [data]);
+  const isOwner = admin?.role !== 'membre';
+  if (err) return <div className="err">{err}</div>;
+  if (!d) return <div className="spinner">Chargement…</div>;
+  const save = async () => { try { setD(await call('settings_save', d)); toast('Réglages enregistrés'); } catch (e) { toast(e.message, 'error'); } };
+  return (
+    <div className="dgrid" style={{ alignItems: 'start' }}>
+      <div className="panel">
+        <div className="panel-h"><span className="panel-ic"><Ic n="whatsapp" s={16} /></span><h3>Coordonnées d'Angy Company</h3></div>
+        <p className="muted small" style={{ marginTop: 0 }}>Affichées aux entreprises clientes : bouton WhatsApp dans « Aide & suggestions », écran d'abonnement expiré, page de connexion et reçus.</p>
+        <Form data={d} setData={setD} fields={[{ k: 'whatsapp', l: 'Numéro WhatsApp du support', ph: '77 000 00 00' }, { k: 'telephone', l: 'Téléphone', ph: '77 000 00 00' }, { k: 'email', l: 'Email', t: 'email' }, { k: 'adresse', l: 'Adresse' }]} />
+      </div>
+      <div className="panel">
+        <div className="panel-h"><span className="panel-ic"><Ic n="clock" s={16} /></span><h3>Inscriptions</h3></div>
+        <Form data={d} setData={setD} fields={[{ k: 'essai_jours', l: 'Durée de l\'essai gratuit (jours)', t: 'number', help: '0 = sans limite. S\'applique aux nouvelles entreprises qui s\'inscrivent seules.' }]} />
+        <div className="row" style={{ justifyContent: 'flex-end', marginTop: 16 }}>
+          {isOwner ? <button className="btn primary" onClick={save}>Enregistrer les réglages</button> : <span className="muted small">Seul le propriétaire peut modifier les réglages.</span>}
+        </div>
+      </div>
     </div>
   );
 }

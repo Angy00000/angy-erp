@@ -13,10 +13,10 @@ import RH from '../../components/modules/RH';
 import Rapports from '../../components/modules/Rapports';
 import Admin from '../../components/modules/Admin';
 import Aide from '../../components/modules/Aide';
+import Imprimes from '../../components/modules/Imprimes';
 import { SearchPalette, Bell, Announcements, PasswordModal, useTheme, waLink } from '../../components/Chrome';
-import { SUPPORT } from '../../lib/support';
 
-const VIEWS = { dashboard: Dashboard, ventes: Ventes, caisse: Caisse, stock: Stock, achats: Achats, production: Production, qualite: Qualite, rh: RH, rapports: Rapports, admin: Admin, aide: Aide };
+const VIEWS = { dashboard: Dashboard, ventes: Ventes, caisse: Caisse, stock: Stock, achats: Achats, production: Production, qualite: Qualite, rh: RH, rapports: Rapports, admin: Admin, aide: Aide, imprimes: Imprimes };
 const SUBTITLES = {
   dashboard: 'Vue d\'ensemble de l\'activité en temps réel',
   ventes: 'Point de vente, factures, devis, commandes et clients',
@@ -28,6 +28,7 @@ const SUBTITLES = {
   rh: 'Employés, pointage, planning des équipes et paie',
   rapports: 'Analyses financières, commerciales, de production et qualité',
   admin: 'Entreprise, utilisateurs, rôles et journal d\'activité',
+  imprimes: 'Fiches vierges et états à imprimer, avec votre logo : production, hygiène, stock, ventes, caisse, personnel',
   aide: 'Signalez un problème ou proposez une amélioration à l\'équipe Angy Company',
 };
 const initials = (s) => (s || '?').split(/\s+/).filter(Boolean).slice(0, 2).map((x) => x[0].toUpperCase()).join('');
@@ -50,7 +51,7 @@ export default function AppShell() {
 
   if (!me) return <div className="spinner" style={{ paddingTop: 120 }}>Chargement…</div>;
   const logout = async () => { await api('auth/logout', { method: 'POST' }).catch(() => {}); if (me.user.support) window.close(); router.replace('/'); };
-  if (me.blocked) return <Blocked msg={me.blocked} company={me.company} onLogout={logout} />;
+  if (me.blocked) return <Blocked msg={me.blocked} company={me.company} contact={me.contact || {}} onLogout={logout} />;
 
   const role = me.user.role;
   const can = (m) => canRole(role, m);
@@ -67,7 +68,7 @@ export default function AppShell() {
       <aside className={'side' + (open ? ' open' : '')}>
         <div className="side-head">
           <div className="logo"><span className="logo-word">ANGY</span><img src="/img/logo.webp" alt="ERP" height={28} /></div>
-          <div className="company">{me.company?.name}</div>
+          <div className="company">{me.company?.logo && <img src={me.company.logo} alt="" />}<span>{me.company?.name}</span></div>
         </div>
         <nav className="nav">
           {visible.map((m) => {
@@ -112,7 +113,7 @@ export default function AppShell() {
           <div className="page-head">
             <div><h1>{meta?.label}</h1><div className="sub">{SUBTITLES[current]}</div></div>
           </div>
-          <View key={current} go={go} can={can} company={me.company} onCompany={load} user={me.user} />
+          <View key={current} go={go} can={can} company={me.company} onCompany={load} user={me.user} contact={me.contact} />
         </div>
       </div>
       {open && <div className="side-ov" onClick={() => setOpen(false)} />}
@@ -122,7 +123,7 @@ export default function AppShell() {
   );
 }
 
-function Blocked({ msg, company, onLogout }) {
+function Blocked({ msg, company, contact, onLogout }) {
   return (
     <div className="lp blocked">
       <div className="lp-bg on" style={{ backgroundImage: 'url(/img/usine-1.webp)' }} />
@@ -132,7 +133,8 @@ function Blocked({ msg, company, onLogout }) {
         <h2>{company?.name}</h2>
         <p>{msg}</p>
         <p className="lp-sub">Vos données sont conservées et seront de nouveau accessibles dès la réactivation.</p>
-        {SUPPORT.whatsapp && <a className="lp-btn lg full" href={waLink(SUPPORT.whatsapp, `Bonjour Angy Company, je vous contacte pour l'abonnement ANGY ERP de ${company?.name || 'mon entreprise'}.`)} target="_blank" rel="noreferrer">Contacter Angy Company sur WhatsApp</a>}
+        {contact.whatsapp && <a className="lp-btn lg full" href={waLink(contact.whatsapp, `Bonjour Angy Company, je vous contacte pour l'abonnement ANGY ERP de ${company?.name || 'mon entreprise'}.`)} target="_blank" rel="noreferrer">Contacter Angy Company sur WhatsApp</a>}
+        {!contact.whatsapp && contact.telephone && <p className="lp-sub">Angy Company : <b>{contact.telephone}</b></p>}
         <button className="lp-btn ghost lg full" style={{ marginTop: 10 }} onClick={onLogout}>Se déconnecter</button>
       </div>
     </div>

@@ -360,7 +360,8 @@ const OPS = {
 
   // ---------- ADMIN ----------
   company_update: ['admin', async (t, user, b) => {
-    const f = ['name', 'sector', 'currency', 'address', 'phone', 'email', 'ninea', 'rccm', 'tax_rate', 'invoice_footer'];
+    const f = ['name', 'sector', 'currency', 'address', 'phone', 'email', 'ninea', 'rccm', 'tax_rate', 'invoice_footer', 'logo', 'city', 'slogan'];
+    if (b.logo && (!/^data:image\/(png|jpeg|webp);base64,/.test(b.logo) || b.logo.length > 400000)) fail('Logo invalide ou trop lourd');
     const keys = f.filter((k) => k in b);
     if (!keys.length) return {};
     return t.one(`UPDATE companies SET ${keys.map((k, i) => `${k}=$${i + 2}`).join(',')} WHERE id=$1 RETURNING *`, [user.cid, ...keys.map((k) => (b[k] === '' ? null : b[k]))]);

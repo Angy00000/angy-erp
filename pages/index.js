@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/router';
 import { api } from '../lib/client';
+import { waLink } from '../components/Chrome';
 
 const SLIDES = [
   { src: '/img/usine-1.webp', k: 'Production', t: 'Recettes, lots et coût de revient' },
@@ -16,6 +17,8 @@ export default function Auth() {
   const [err, setErr] = useState(null);
   const [busy, setBusy] = useState(false);
   const [slide, setSlide] = useState(0);
+  const [ct, setCt] = useState({});
+  useEffect(() => { api('auth/contact').then(setCt).catch(() => {}); }, []);
   useEffect(() => { api('auth/me').then(() => router.replace('/app')).catch(() => {}); }, [router]);
   useEffect(() => { const t = setTimeout(() => setSlide((x) => (x + 1) % SLIDES.length), 6500); return () => clearTimeout(t); }, [slide]);
   const set = (k) => (e) => setD({ ...d, [k]: e.target.type === 'checkbox' ? e.target.checked : e.target.value });
@@ -85,7 +88,10 @@ export default function Auth() {
           <div><div className="lp-cap-k">{cur.k}</div><div className="lp-cap-t">{cur.t}</div></div>
         </div>
         <div className="lp-bars">{SLIDES.map((_, i) => <button key={i} aria-label={`Image ${i + 1}`} onClick={() => setSlide(i)} className={i === slide ? 'on' : i < slide ? 'done' : ''}><i key={i === slide ? slide : 'x'} /></button>)}</div>
-        <div className="lp-copy">© Angy Company — Dakar, Sénégal</div>
+        <div className="lp-copy">
+          {ct.whatsapp && <a className="lp-wa" href={waLink(ct.whatsapp, 'Bonjour Angy Company, je souhaite en savoir plus sur ANGY ERP.')} target="_blank" rel="noreferrer">WhatsApp {ct.whatsapp}</a>}
+          © Angy Company — {ct.adresse || 'Dakar, Sénégal'}
+        </div>
       </footer>
     </div>
   );
