@@ -49,7 +49,7 @@ function Batches({ onQuick, onDetail, onEdit, version }) {
         <label className="small muted">au <input type="date" className="input sm" value={range.to} onChange={(e) => setRange({ ...range, to: e.target.value })} /></label>
       </div>
       <div className="grid g3" style={{ marginBottom: 14 }}>
-        <Stat k="Produit sur la période" v={`${num(tot.l)} L`} s={`${list.length} production(s)`} />
+        <Stat k="Produit sur la période" v={tot.l > 0 ? `${num(tot.l)} L` : `${list.length} production(s)`} s={tot.l > 0 ? `${list.length} production(s)` : 'sur la période choisie'} />
         <Stat k="Coût total" v={money(tot.c)} s="matières + emballages + dépenses" />
         <Stat k="Bénéfice prévu (si tout est vendu)" v={money(tot.s - tot.c)} s={`ventes prévues ${money(tot.s)}`} accent={tot.s - tot.c > 0} />
       </div>
@@ -60,7 +60,7 @@ function Batches({ onQuick, onDetail, onEdit, version }) {
             <div className="batch-h">
               <div className="batch-date"><b>{new Date(String(g.date).slice(0, 10) + 'T00:00:00').getDate()}</b><span>{new Date(String(g.date).slice(0, 10) + 'T00:00:00').toLocaleDateString('fr-FR', { month: 'short' })}</span></div>
               <div className="batch-t">
-                <h3>{g.fams.join(' + ')} <span className="batch-l">{num(g.liters)} L</span></h3>
+                <h3>{g.fams.join(' + ')} {g.liters > 0 && <span className="batch-l">{num(g.liters)} L</span>}</h3>
                 <p>{g.rows.length} format(s) · {g.rows.map((r) => r.number.replace(/^OF-\d{4}-/, 'OF ')).join(', ')}{g.user ? ` · par ${g.user}` : ''}</p>
               </div>
               <div className="batch-k"><span>Coût</span><b>{money(g.cost)}</b></div>
