@@ -328,9 +328,10 @@ const OPS = {
     for (const l of lines) {
       l.share = byLiters ? l.liters / totalL : l.qty / totalQ;
       l.number = await nextNumber(t, user.cid, 'OF', 'OF');
-      l.po = await t.one(`INSERT INTO production_orders (company_id,number,product_id,planned_qty,produced_qty,status,planned_date,started_at,finished_at,volume_l,team,notes,user_id)
-        VALUES ($1,$2,$3,$4,$4,'en_cours',$5::date,$5::date,$5::date,$6,$7,$8,$9) RETURNING *`,
-        [user.cid, l.number, l.item.id, l.qty, date, l.liters || null, b.team || null, note, user.uid]);
+      l.po = await t.one(`INSERT INTO production_orders (company_id,number,product_id,planned_qty,produced_qty,status,planned_date,started_at,finished_at,volume_l,team,notes,user_id,batch_id)
+        VALUES ($1,$2,$3,$4,$4,'en_cours',$5::date,$5::date,$5::date,$6,$7,$8,$9,$10) RETURNING *`,
+        [user.cid, l.number, l.item.id, l.qty, date, l.liters || null, b.team || null, note, user.uid, lines[0].po?.id || null]);
+      if (!lines[0].po || l === lines[0]) await t.q('UPDATE production_orders SET batch_id=id WHERE id=$1 AND batch_id IS NULL', [l.po.id]);
     }
     const ref = lines[0].po;
     const refLabel = lines.map((l) => l.number).join(', ');
@@ -357,6 +358,107 @@ const OPS = {
     }
     if (b.account_id && expense > 0) await cashTx(t, user, { account_id: b.account_id, amount: -expense, category: 'Production', label: `Dépenses production ${out.map((o) => o.number).join(', ')}`, ref_type: 'production_orders', ref_id: out[0].id, date });
     return { id: out[0].id, number: out.map((o) => o.number).join(', '), orders: out };
+  }],
+
+  // Modifier (ou supprimer avec b.remove) une production terminée : formats, quantités, ce qui a été pris dans le magasin,
+  // dépenses, date. Le stock, la caisse, les coûts et la marge des ventes déjà faites sont recalculés.
+  prod_edit: ['production', async (t, user, b) => {
+    const cid = user.cid;
+    const first = await t.one('SELECT * FROM production_orders WHERE id=$1 AND company_id=$2', [b.id, cid]);
+    if (!first) fail('Production introuvable');
+    const bid = first.batch_id || first.id;
+    const pos = await t.q("SELECT p.*, i.name AS product_name FROM production_orders p LEFT JOIN items i ON i.id=p.product_id WHERE p.company_id=$1 AND (p.id=$2 OR p.batch_id=$2) AND p.status='termine' ORDER BY p.id FOR UPDATE OF p", [cid, bid]);
+    if (!pos.length) fail('Seule une production terminée peut être modifiée');
+    const ids = pos.map((p) => p.id);
+    const date = b.date || String(pos[0].planned_date || today()).slice(0, 10);
+    // 1. Rendre au magasin ce qui avait été pris, effacer l'ancienne dépense de caisse
+    const moves = await t.q("SELECT * FROM stock_movements WHERE company_id=$1 AND ref_type='production_orders' AND ref_id = ANY($2::int[]) AND type='production' AND qty<0", [cid, ids]);
+    for (const m of moves) if (m.lot_id) await t.q('UPDATE lots SET qty=qty-$1 WHERE id=$2', [n(m.qty), m.lot_id]);
+    if (moves.length) await t.q('DELETE FROM stock_movements WHERE id = ANY($1::bigint[])', [moves.map((m) => m.id)]);
+    await t.q('DELETE FROM production_consumptions WHERE production_id = ANY($1::int[])', [ids]);
+    await t.q("DELETE FROM cash_transactions WHERE company_id=$1 AND ref_type='production_orders' AND ref_id = ANY($2::int[]) AND category='Production'", [cid, ids]);
+    // 2. Nouveaux formats / quantités
+    const lines = [];
+    if (!b.remove) {
+      for (const l of Array.isArray(b.lines) ? b.lines : []) {
+        if (!l.product_id) continue;
+        const item = await t.one('SELECT * FROM items WHERE id=$1 AND company_id=$2', [l.product_id, cid]);
+        if (!item) fail('Produit introuvable');
+        const uv = n(item.unit_volume);
+        let qty = n(l.qty);
+        if (!qty && n(l.volume_l) && uv) qty = Math.round((n(l.volume_l) / uv) * 1000) / 1000;
+        if (qty <= 0) continue;
+        lines.push({ item, qty, liters: uv ? qty * uv : 0, po_id: Number(l.po_id) || null });
+      }
+      if (!lines.length) fail('Indiquez au moins un produit avec le volume ou la quantité produite');
+    }
+    const totalL = lines.reduce((s, l) => s + l.liters, 0), totalQ = lines.reduce((s, l) => s + l.qty, 0);
+    const byLiters = totalL > 0 && lines.every((x) => x.liters > 0);
+    const note = [b.notes, lines.length > 1 ? `Production de ${Math.round(totalL * 1000) / 1000} L répartie en ${lines.length} formats` : null].filter(Boolean).join(' · ') || null;
+    for (const po of pos) {
+      const l = lines.find((x) => x.po_id === po.id && x.item.id === po.product_id && !x.po);
+      const lot = po.lot_id ? await t.one('SELECT * FROM lots WHERE id=$1 FOR UPDATE', [po.lot_id]) : null;
+      const sold = lot ? Math.max(0, Math.round((n(lot.initial_qty) - n(lot.qty)) * 1000) / 1000) : 0;
+      if (l) {
+        if (l.qty + 1e-9 < sold) fail(`${String(po.product_name).trim()} : ${sold} déjà vendu(s) ou sorti(s), la quantité ne peut pas être inférieure`);
+        if (lot) {
+          await t.q('UPDATE lots SET qty=qty+$1, initial_qty=$2, production_date=$3, expiry_date=COALESCE($4::date, expiry_date) WHERE id=$5', [l.qty - n(lot.initial_qty), l.qty, date, b.expiry_date || null, lot.id]);
+          await t.q("UPDATE stock_movements SET qty=$1 WHERE lot_id=$2 AND ref_type='production_orders' AND ref_id=$3 AND type='production' AND qty>0", [l.qty, lot.id, po.id]);
+        }
+        l.po = po; l.lot = lot;
+      } else {
+        if (sold > 1e-9) fail(`${String(po.product_name).trim()} : ${sold} déjà vendu(s) ou sorti(s), ce format ne peut pas être retiré`);
+        if (lot && n(lot.qty) !== 0) {
+          await t.q(`INSERT INTO stock_movements (company_id,item_id,lot_id,type,qty,unit_cost,ref_type,ref_id,note,user_id) VALUES ($1,$2,$3,'annulation',$4,$5,'production_orders',$6,$7,$8)`,
+            [cid, lot.item_id, lot.id, -n(lot.qty), n(lot.unit_cost), po.id, `${po.number} — production ${b.remove ? 'supprimée' : 'corrigée'}`, user.uid]);
+          await t.q('UPDATE lots SET qty=0 WHERE id=$1', [lot.id]);
+        }
+        await t.q("UPDATE production_orders SET status='annule', notes=COALESCE(notes,'') || $2 WHERE id=$1", [po.id, b.remove ? ' (supprimée)' : ' (format retiré)']);
+      }
+    }
+    if (b.remove) return { removed: ids.length, number: pos.map((p) => p.number).join(', ') };
+    for (const l of lines) {
+      if (l.po) continue;
+      const number = await nextNumber(t, cid, 'OF', 'OF');
+      l.po = await t.one(`INSERT INTO production_orders (company_id,number,product_id,planned_qty,produced_qty,status,planned_date,started_at,finished_at,volume_l,team,notes,user_id,batch_id)
+        VALUES ($1,$2,$3,$4,$4,'en_cours',$5::date,$5::date,$5::date,$6,$7,$8,$9,$10) RETURNING *`, [cid, number, l.item.id, l.qty, date, l.liters || null, b.team || null, note, user.uid, bid]);
+      l.isNew = true;
+    }
+    // 3. Ce qui a été pris dans le magasin
+    const used = new Map();
+    for (const c of Array.isArray(b.consumptions) ? b.consumptions : []) { const q = n(c.qty), id = Number(c.item_id); if (id && q > 0) used.set(id, (used.get(id) || 0) + q); }
+    const expense = n(b.expense_cost), labor = n(b.labor_cost);
+    if (expense + labor <= 0 && !used.size) fail('Indiquez ce qui a été utilisé du stock ou les dépenses de la production');
+    for (const l of lines) l.share = byLiters ? l.liters / totalL : l.qty / totalQ;
+    const ref = lines[0].po; const refLabel = lines.map((l) => l.po.number).join(', ');
+    let material = 0;
+    for (const [itemId, q] of used) {
+      const o = await stockOut(t, user, { item_id: itemId, qty: q, type: 'production', ref_type: 'production_orders', ref_id: ref.id, note: `Utilisé pour ${refLabel}` });
+      material += o.cost;
+      for (const k of o.consumed) for (const l of lines) await t.q('INSERT INTO production_consumptions (production_id,item_id,lot_id,qty,unit_cost) VALUES ($1,$2,$3,$4,$5)', [l.po.id, itemId, k.lot_id, k.qty * l.share, k.unit_cost]);
+    }
+    // 4. Coûts, lots, marge des ventes déjà faites
+    const out = [];
+    for (const l of lines) {
+      const over = n(l.po.overhead_cost);
+      const mat = material * l.share, exp = expense * l.share, lab = labor * l.share, total = mat + exp + lab + over, unit = total / l.qty;
+      let lot = l.lot;
+      if (l.isNew) {
+        lot = await stockIn(t, user, { item_id: l.item.id, qty: l.qty, unit_cost: unit, expiry_date: b.expiry_date, production_date: date, type: 'production', ref_type: 'production_orders', ref_id: l.po.id, note: l.po.number });
+      } else if (lot) {
+        await t.q('UPDATE lots SET unit_cost=$1 WHERE id=$2', [unit, lot.id]);
+        await t.q('UPDATE stock_movements SET unit_cost=$1 WHERE lot_id=$2 AND (qty<0 OR (ref_type=$3 AND ref_id=$4))', [unit, lot.id, 'production_orders', l.po.id]);
+        const docs = await t.q('UPDATE sales_lines SET unit_cost=$1 WHERE lot_id=$2 RETURNING doc_id', [unit, lot.id]);
+        for (const dId of [...new Set(docs.map((x) => x.doc_id))]) await t.q('UPDATE sales_docs SET cost=(SELECT COALESCE(SUM(qty*COALESCE(unit_cost,0)),0) FROM sales_lines WHERE doc_id=$1) WHERE id=$1', [dId]);
+        lot = await t.one('SELECT * FROM lots WHERE id=$1', [lot.id]);
+      }
+      await t.q(`UPDATE production_orders SET status='termine', planned_qty=$1, produced_qty=$1, volume_l=$2, planned_date=$3::date, started_at=$3::date, finished_at=$3::date,
+        material_cost=$4, labor_cost=$5, expense_cost=$6, total_cost=$7, unit_cost=$8, lot_id=$9, lot_number=$10, expiry_date=$11, notes=$12, team=COALESCE($13, team) WHERE id=$14`,
+        [l.qty, l.liters || null, date, r2(mat), r2(lab), r2(exp), r2(total), unit, lot?.id || null, lot?.lot_number || null, lot?.expiry_date || null, note, b.team || null, l.po.id]);
+      out.push({ id: l.po.id, number: l.po.number, product: l.item.name, qty: l.qty, unit_cost: unit });
+    }
+    if (b.account_id && expense > 0) await cashTx(t, user, { account_id: b.account_id, amount: -expense, category: 'Production', label: `Dépenses production ${out.map((o) => o.number).join(', ')}`, ref_type: 'production_orders', ref_id: out[0].id, date });
+    return { id: out[0].id, number: out.map((o) => o.number).join(', '), orders: out, edited: true };
   }],
 
   // ---------- VENTES ----------

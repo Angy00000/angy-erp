@@ -9,6 +9,7 @@ export const REQ_TYPES = { probleme: ['Un problème', 'red'], suggestion: ['Une 
 export const REQ_STATUS = { nouvelle: ['Envoyée', 'amber'], en_cours: ['En cours', 'blue'], faite: ['Réglée', 'green'], refusee: ['Non retenue', 'gray'] };
 
 const GUIDE = [
+  ['Corriger une production', 'Production → Ordres de fabrication → ✏️ Modifier sur la production → corrigez les litres, les formats, ce qui a été pris dans le magasin ou les dépenses → Enregistrer les corrections. Stock, caisse et coûts se recalculent.'],
   ['Surveiller les vendeurs et le personnel', 'Le Gardien (menu ⛨ ou le bouclier en haut) → toutes les actions sensibles : annulations, remises, pertes, sorties d\'argent, dépôts des vendeurs, accès. Filtrez par personne ou par gravité. Cliquez « Recevoir les notifications » pour être prévenu.'],
   ['Enregistrer une production', 'Production → ⚡ Production rapide → 1) le jus et les litres (+ Ajouter un autre format pour les bouteilles) → 2) ce qu\'on a pris dans le magasin (bissap, sucre, sachets…) : c\'est retiré du stock automatiquement → 3) les autres dépenses (gaz, transport…) → Enregistrer.'],
   ['Enregistrer un achat de matières', 'Stock & Articles (ou Achats) → 🛒 Nouvel achat → les articles, quantités et prix, puis la caisse qui a payé. Le stock augmente et l\'argent sort de la caisse. Pour corriger : Achats → 🛒 Achats payés → ✏️ Modifier.'],

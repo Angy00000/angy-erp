@@ -227,6 +227,31 @@ export default handler(async (req, res, user) => {
     return out;
   }
 
+  // Une production (tous ses formats) prête à être modifiée
+  if (action === 'prod_batch') {
+    if (!c('production')) fail('Accès refusé', 403);
+    const first = await one('SELECT id,batch_id FROM production_orders WHERE id=$1 AND company_id=$2', [Number(req.query.id), cid]);
+    if (!first) fail('Production introuvable', 404);
+    const bid = first.batch_id || first.id;
+    const pos = await q(`SELECT p.id,p.number,p.product_id,p.produced_qty,p.volume_l,p.planned_date,p.notes,p.team,p.expense_cost,p.labor_cost,p.overhead_cost,p.lot_id,p.lot_number,p.expiry_date,
+        i.name,i.unit,i.unit_volume, l.qty AS lot_qty, l.initial_qty AS lot_initial
+      FROM production_orders p LEFT JOIN items i ON i.id=p.product_id LEFT JOIN lots l ON l.id=p.lot_id
+      WHERE p.company_id=$1 AND (p.id=$2 OR p.batch_id=$2) AND p.status='termine' ORDER BY p.id`, [cid, bid]);
+    if (!pos.length) fail('Seule une production terminée peut être modifiée');
+    const ids = pos.map((p) => p.id);
+    const cons = await q(`SELECT m.item_id, -SUM(m.qty) AS qty FROM stock_movements m WHERE m.company_id=$1 AND m.ref_type='production_orders' AND m.ref_id = ANY($2::int[]) AND m.type='production' AND m.qty<0 GROUP BY m.item_id ORDER BY m.item_id`, [cid, ids]);
+    const cash = await one(`SELECT account_id FROM cash_transactions WHERE company_id=$1 AND ref_type='production_orders' AND ref_id = ANY($2::int[]) AND category='Production' LIMIT 1`, [cid, ids]);
+    return {
+      id: pos[0].id, numbers: pos.map((p) => p.number), date: String(pos[0].planned_date || '').slice(0, 10),
+      notes: String(pos[0].notes || '').replace(/\s*·?\s*Production de [\d.,]+ L répartie en \d+ formats/, '').trim(), team: pos[0].team,
+      expense_cost: pos.reduce((s, p) => s + n(p.expense_cost), 0), labor_cost: pos.reduce((s, p) => s + n(p.labor_cost), 0), account_id: cash?.account_id || null,
+      expiry_date: pos[0].expiry_date ? String(pos[0].expiry_date).slice(0, 10) : '',
+      lines: pos.map((p) => ({ po_id: p.id, number: p.number, product_id: p.product_id, name: p.name, unit: p.unit, qty: n(p.produced_qty), unit_volume: n(p.unit_volume),
+        sold: p.lot_id ? Math.max(0, Math.round((n(p.lot_initial) - n(p.lot_qty)) * 1000) / 1000) : 0, lot_number: p.lot_number })),
+      consumptions: cons.map((x) => ({ item_id: x.item_id, qty: n(x.qty) })),
+    };
+  }
+
   // Historique des achats payés (« Nouvel achat ») avec leurs articles
   if (action === 'purchases') {
     if (!c('stock') && !c('achats')) fail('Accès refusé', 403);

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { op, crud, money, num, opts, today, report, date, LABELS } from '../../lib/client';
+import { api, op, crud, money, num, opts, today, report, date, LABELS } from '../../lib/client';
 import { Tabs, Badge, run, confirmDo, invalidateRefs, useData, Modal, Stat, useRefOptions, RefSelect, toast } from '../ui';
 import { EXPENSE_CATS } from './Caisse';
 import CrudTable from '../CrudTable';
@@ -48,6 +48,7 @@ function Orders() {
         ]}
         rowActions={(r, reload) => <>
           {r.status === 'termine' && <button className="btn sm primary" onClick={() => setModal({ k: 'detail', row: r })}>Coûts & bénéfice</button>}
+          {r.status === 'termine' && <button className="btn sm" onClick={() => setModal({ k: 'edit', row: r, reload })}>✏️ Modifier</button>}
           <a className="btn sm" href={`/print/production_orders/${r.id}`} target="_blank" rel="noreferrer">Fiche</a>
           {r.status === 'termine' && r.lot_id && <a className="btn sm" href={`/etiquettes?lot=${r.lot_id}`} target="_blank" rel="noreferrer">Étiquettes</a>}
           {['planifie', 'en_cours'].includes(r.status) && <button className="btn sm" onClick={() => setModal({ k: 'check', row: r })}>Besoins</button>}
@@ -59,6 +60,7 @@ function Orders() {
       {modal?.k === 'check' && <CheckModal row={modal.row} onClose={() => setModal(null)} />}
       {modal?.k === 'done' && <CompleteModal row={modal.row} onClose={(ok) => { const row = modal.row; close(modal.reload)(ok); if (ok) setModal({ k: 'detail', row }); }} />}
       {modal?.k === 'detail' && <ProdDetail id={modal.row.id} onClose={() => setModal(null)} />}
+      {modal?.k === 'edit' && <EditProd id={modal.row.id} onClose={(res) => { const rl = modal.reload; setModal(null); if (res) { invalidateRefs('items'); invalidateRefs('lots'); invalidateRefs('accounts'); rl(); } }} />}
       {modal?.k === 'quick' && <QuickProd onClose={(res) => { const rl = modal.reload; setModal(res && res.orders?.length === 1 ? { k: 'detail', row: { id: res.id } } : null); if (res) { invalidateRefs('items'); invalidateRefs('lots'); rl(); } }} />}
     </>
   );
@@ -206,7 +208,9 @@ const pct = (v) => `${(Number(v) || 0).toFixed(1)} %`;
 function Profitability() {
   const [range, setRange] = useState({ from: today().slice(0, 4) + '-01-01', to: today() });
   const [detail, setDetail] = useState(null);
-  const { data, loading } = useData(() => report('profitability', range), [range.from, range.to]);
+  const [editing, setEditing] = useState(null);
+  const [rv, setRv] = useState(0);
+  const { data, loading } = useData(() => report('profitability', range), [range.from, range.to, rv]);
   const rows = data?.rows || [];
   const sum = (k) => rows.reduce((s, r) => s + (Number(r[k]) || 0), 0);
   return (
@@ -235,7 +239,7 @@ function Profitability() {
             <td className="r">{money(r.revenue)}</td>
             <td className="r"><span className={'strong ' + (r.profit < 0 ? 'neg' : 'pos')}>{money(r.profit)}</span></td>
             <td className="r"><span className={r.projected_profit < 0 ? 'neg' : ''}>{money(r.projected_profit)}</span></td>
-            <td className="actions"><button className="btn sm" onClick={() => setDetail(r.id)}>Détail</button></td>
+            <td className="actions"><button className="btn sm" onClick={() => setDetail(r.id)}>Détail</button><button className="btn sm" onClick={() => setEditing(r.id)}>✏️ Modifier</button></td>
           </tr>
         ))}</tbody>
         {rows.length > 0 && <tfoot><tr><td>Total</td><td /><td className="r">{money(sum('real_cost'))}</td><td /><td className="r">{num(sum('sold_qty'))}</td><td className="r">{money(sum('revenue'))}</td><td className="r">{money(sum('profit'))}</td><td className="r">{money(sum('projected_profit'))}</td><td /></tr></tfoot>}
@@ -248,6 +252,7 @@ function Profitability() {
         <b> Bénéfice réalisé</b> = ventes de ce lot − coût des unités vendues. <b>Bénéfice prévu</b> = ventes + stock restant au prix de vente − coût total.
       </div>
       {detail && <ProdDetail id={detail} onClose={() => setDetail(null)} />}
+      {editing && <EditProd id={editing} onClose={(res) => { setEditing(null); if (res) { invalidateRefs('items'); invalidateRefs('lots'); setRv((x) => x + 1); } }} />}
     </div>
   );
 }
@@ -335,14 +340,23 @@ function ProdDetail({ id, onClose }) {
 const USED_TYPES = ['mp', 'emballage', 'consommable', 'semi_fini'];
 const itemCost = (it) => Number(it?.cost_price) || Number(it?.purchase_price) || 0;
 
-export function QuickProd({ onClose, initial, note }) {
+// Ouvre une production terminée (tous ses formats) dans le formulaire de Production rapide, pour la corriger
+export function EditProd({ id, onClose }) {
+  const { data, error } = useData(() => api(`app/prod_batch?id=${id}`), [id]);
+  if (error) return <Modal title="Modifier la production" onClose={() => onClose(null)}><div className="err">{error.message || String(error)}</div></Modal>;
+  if (!data) return <Modal title="Modifier la production" onClose={() => onClose(null)}><div className="spinner">Chargement…</div></Modal>;
+  return <QuickProd edit={data} onClose={onClose} />;
+}
+
+export function QuickProd({ onClose, initial, note, edit }) {
   const products = useRefOptions('items', { type: 'pf', active: true });
   const { data: allItems } = useData(() => crud.list('items', { active: true, limit: 1000 }), []);
   const stockItems = (allItems || []).filter((x) => USED_TYPES.includes(x.type));
-  const [d, setD] = useState({ date: today() });
-  const [rows, setRows] = useState(initial && initial.length ? initial : [{}]);
-  const [usedRows, setUsedRows] = useState([{}]);
-  const [manual, setManual] = useState(false); // l'utilisateur a modifié lui-même ce qui a été pris dans le magasin
+  const [d, setD] = useState(() => (edit ? { date: edit.date || today(), expense_cost: edit.expense_cost ? String(edit.expense_cost) : '', labor_cost: edit.labor_cost ? String(edit.labor_cost) : '', account_id: edit.account_id || '', notes: edit.notes || '', expiry_date: edit.expiry_date || '', _exp_manual: true, _lab_manual: true } : { date: today() }));
+  const [rows, setRows] = useState(() => (edit ? edit.lines.map((l) => ({ po_id: l.po_id, product_id: l.product_id, sold: l.sold, volume_l: l.unit_volume ? String(Math.round(l.qty * l.unit_volume * 1000) / 1000) : '', qty: l.unit_volume ? '' : String(l.qty) })) : initial && initial.length ? initial : [{}]));
+  const [usedRows, setUsedRows] = useState(() => (edit && edit.consumptions.length ? edit.consumptions.map((c) => ({ item_id: c.item_id, qty: String(c.qty) })) : [{}]));
+  const prevUsed = (id) => (edit ? edit.consumptions.filter((c) => c.item_id === id).reduce((s2, c) => s2 + Number(c.qty), 0) : 0);
+  const [manual, setManual] = useState(!!edit); // l'utilisateur a modifié lui-même ce qui a été pris dans le magasin
   const [fromRecipe, setFromRecipe] = useState(false);
   const setUsed = (i, patch) => { setManual(true); setUsedRows((r) => r.map((x, j) => (j === i ? { ...x, ...patch } : x))); };
   // Recettes actives, avec leurs lignes (matières et emballages pour un rendement donné)
@@ -353,7 +367,8 @@ export function QuickProd({ onClose, initial, note }) {
   const usedCalc = usedRows.map((r) => {
     const it = stockItems.find((x) => x.id === Number(r.item_id));
     const q = Number(r.qty) || 0;
-    return { it, q, value: it ? q * itemCost(it) : 0, short: it && q > Number(it.stock) + 1e-9 };
+    const avail = it ? Number(it.stock) + prevUsed(it.id) : 0;
+    return { it, q, avail, value: it ? q * itemCost(it) : 0, short: it && q > avail + 1e-9 };
   });
   const material = usedCalc.reduce((s, c) => s + c.value, 0);
   const [err, setErr] = useState(null);
@@ -405,15 +420,21 @@ export function QuickProd({ onClose, initial, note }) {
     setErr(null); setBusy(true);
     try {
       const { _exp_manual, _lab_manual, ...dd } = d; // eslint-disable-line no-unused-vars
-      const r = await op('prod_simple', { ...dd, lines: rows.filter((x) => x.product_id), consumptions: usedRows.filter((x) => x.item_id && Number(x.qty) > 0) });
-      toast(`Production enregistrée : ${r.number}`);
+      const r = await op(edit ? 'prod_edit' : 'prod_simple', { ...dd, id: edit?.id, lines: rows.filter((x) => x.product_id), consumptions: usedRows.filter((x) => x.item_id && Number(x.qty) > 0) });
+      toast(edit ? `Production ${r.number} corrigée : stock, caisse et coûts recalculés` : `Production enregistrée : ${r.number}`);
       onClose(r);
     } catch (e) { setErr(e.message); } finally { setBusy(false); }
   };
+  const remove = async () => {
+    if (!confirmDo(`Supprimer la production ${edit.numbers.join(', ')} ?\n\nLes jus sortent du stock, ce qui avait été pris dans le magasin y retourne et la dépense de caisse est annulée.`)) return;
+    setErr(null); setBusy(true);
+    try { await op('prod_edit', { id: edit.id, remove: true }); toast('Production supprimée'); onClose({ removed: true }); } catch (e) { setErr(e.message); setBusy(false); }
+  };
   return (
-    <Modal wide title="⚡ Production rapide" onClose={() => onClose(null)}
-      footer={<><button className="btn" onClick={() => onClose(null)}>Annuler</button><button className="btn primary" disabled={busy} onClick={submit}>{busy ? 'Enregistrement…' : 'Enregistrer la production'}</button></>}>
+    <Modal wide title={edit ? `✏️ Modifier la production ${edit.numbers.join(', ')}` : '⚡ Production rapide'} onClose={() => onClose(null)}
+      footer={<>{edit && <button className="btn danger" style={{ marginRight: 'auto' }} disabled={busy} onClick={remove}>Supprimer cette production</button>}<button className="btn" onClick={() => onClose(null)}>Fermer</button><button className="btn primary" disabled={busy} onClick={submit}>{busy ? 'Enregistrement…' : edit ? 'Enregistrer les corrections' : 'Enregistrer la production'}</button></>}>
       {err && <div className="err">{err}</div>}
+      {edit && <div className="note" style={{ marginBottom: 12 }}>Corrigez ce qui est faux : litres, formats, ce qui a été pris dans le magasin, dépenses, date. <b>Le stock, la caisse, le coût par unité et le bénéfice sont recalculés automatiquement.</b> On ne peut pas descendre en dessous de ce qui a déjà été vendu.</div>}
       {note && <div className="note" style={{ marginBottom: 12 }}>{note}</div>}
       <h3 style={{ fontSize: 14, margin: '0 0 8px' }}>Ce qui a été produit</h3>
       <div className="muted small" style={{ marginBottom: 8 }}>Une ligne par format. Ex. : Bissap en sachets <b>et</b> Bissap en bouteilles de 1 L. Les dépenses sont réparties selon les litres.</div>
@@ -430,10 +451,11 @@ export function QuickProd({ onClose, initial, note }) {
               <td style={{ width: 170 }}>{c.uv > 0
                 ? <input type="number" step="any" className="input" placeholder="Litres" value={r.volume_l || ''} onChange={(e) => setRow(i, { volume_l: e.target.value })} />
                 : <input type="number" step="any" className="input" placeholder={c.p ? c.p.unit : 'Quantité'} value={r.qty || ''} onChange={(e) => setRow(i, { qty: e.target.value })} disabled={!c.p} />}</td>
-              <td className="strong" style={{ whiteSpace: 'nowrap' }}>{c.qty > 0 ? `${num(c.qty)} ${c.p.unit}${c.liters ? ` · ${num(c.liters)} L` : ''}` : <span className="muted">—</span>}</td>
+              <td className="strong" style={{ whiteSpace: 'nowrap' }}>{c.qty > 0 ? `${num(c.qty)} ${c.p.unit}${c.liters ? ` · ${num(c.liters)} L` : ''}` : <span className="muted">—</span>}
+                {r.sold > 0 && <div className={'small ' + (c.qty + 1e-9 < r.sold ? 'neg strong' : 'muted')}>{num(r.sold)} déjà vendu(s)</div>}</td>
               {total > 0 && <td className="r mono">{unitCost != null ? money(unitCost) : ''}</td>}
               {total > 0 && <td className="r mono">{unitCost != null && Number(c.p.sale_price) > 0 ? <span className={c.p.sale_price - unitCost < 0 ? 'neg strong' : 'pos strong'}>{money(c.p.sale_price - unitCost)}</span> : ''}</td>}
-              <td>{rows.length > 1 && <button className="btn sm ghost" onClick={() => setRows((x) => x.filter((_, j) => j !== i))}>✕</button>}</td>
+              <td>{rows.length > 1 && !(r.sold > 0) && <button className="btn sm ghost" onClick={() => setRows((x) => x.filter((_, j) => j !== i))}>✕</button>}</td>
             </tr>
           );
         })}</tbody>
@@ -461,7 +483,7 @@ export function QuickProd({ onClose, initial, note }) {
                   return list.length ? <optgroup key={t} label={l}>{list.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</optgroup> : null;
                 })}
               </select></td>
-              <td className={'small ' + (c.it && Number(c.it.stock) <= 0 ? 'neg strong' : 'muted')} style={{ whiteSpace: 'nowrap' }}>{c.it ? `${num(c.it.stock)} ${c.it.unit || ''}` : '—'}</td>
+              <td className={'small ' + (c.it && c.avail <= 0 ? 'neg strong' : 'muted')} style={{ whiteSpace: 'nowrap' }}>{c.it ? `${num(c.avail)} ${c.it.unit || ''}` : '—'}</td>
               <td><input type="number" step="any" className="input" placeholder={c.it?.unit || 'Quantité'} value={r.qty || ''} onChange={(e) => setUsed(i, { qty: e.target.value })} disabled={!c.it} />
                 {c.short && <div className="neg small strong">Stock insuffisant</div>}</td>
               <td className="r mono">{c.q > 0 ? (itemCost(c.it) ? money(c.value) : <span className="muted small">prix d'achat non renseigné</span>) : ''}</td>
@@ -485,7 +507,7 @@ export function QuickProd({ onClose, initial, note }) {
       <h3 style={{ fontSize: 14, margin: '20px 0 8px' }}>3. Informations du lot</h3>
       <div className="form">
         <div className="field"><label>Date de production</label><input type="date" className="input" value={d.date} onChange={set('date')} /></div>
-        <div className="field"><label>N° de lot (optionnel)</label><input className="input" value={d.lot_number || ''} onChange={set('lot_number')} placeholder="Automatique" /></div>
+        {!edit && <div className="field"><label>N° de lot (optionnel)</label><input className="input" value={d.lot_number || ''} onChange={set('lot_number')} placeholder="Automatique" /></div>}
         <div className="field"><label>Date limite (DLC)</label><input type="date" className="input" value={d.expiry_date || ''} onChange={set('expiry_date')} /></div>
         <div className="field full"><label>Note</label><input className="input" value={d.notes || ''} onChange={set('notes')} /></div>
       </div>
