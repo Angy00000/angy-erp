@@ -1,5 +1,6 @@
 import bcrypt from 'bcryptjs';
 import { handler, fail, audit, nextNumber } from '../../../../lib/api';
+import { guardCrud } from '../../../../lib/guardian';
 import { can } from '../../../../lib/perms';
 import { ENTITIES } from '../../../../lib/entities';
 import { q, one, tx } from '../../../../lib/db';
@@ -122,6 +123,7 @@ export default handler(async (req, res, user) => {
       return full;
     });
     await audit(user, 'création', entity, row.id, { number: row.number, name: row.name || row.label });
+    await guardCrud(user, 'création', entity, row, null, body);
     return row;
   }
 
@@ -158,6 +160,7 @@ export default handler(async (req, res, user) => {
       return full;
     });
     await audit(user, 'modification', entity, id, { number: row.number, name: row.name || row.label });
+    await guardCrud(user, 'modification', entity, row, existing, body);
     return row;
   }
 
@@ -173,6 +176,7 @@ export default handler(async (req, res, user) => {
       await t.q(`DELETE FROM ${cfg.table} WHERE id=$1 AND company_id=$2`, [id, cid]);
     });
     await audit(user, 'suppression', entity, id, { number: existing.number, name: existing.name || existing.label });
+    await guardCrud(user, 'suppression', entity, null, existing, body);
     return { ok: true };
   }
   fail('Méthode non supportée', 405);

@@ -229,3 +229,37 @@ export function WhatsNew({ list }) {
     </Modal>
   );
 }
+
+// ---------- Le Gardien : bouclier dans la barre du haut (direction) + notifications du navigateur ----------
+export function GuardBell({ go }) {
+  const [d, setD] = useState({ unread: 0, grave: 0 });
+  useEffect(() => {
+    let alive = true;
+    const load = () => api('app/guardian?count=1').then((r) => {
+      if (!alive) return;
+      setD(r);
+      try {
+        const lastId = Number(localStorage.getItem('erp_guard_notified') || 0);
+        const fresh = (r.last || []).filter((a) => a.id > lastId);
+        if (fresh.length && typeof Notification !== 'undefined' && Notification.permission === 'granted' && document.visibilityState !== 'visible') {
+          const a = fresh[0];
+          const nt = new Notification(`${a.level === 'grave' ? '🔴' : '🟠'} Le Gardien — ${a.title}`, { body: (fresh.length > 1 ? `+${fresh.length - 1} autre(s) alerte(s). ` : '') + (a.message || ''), icon: '/icon-192.png', tag: 'gardien-' + a.id });
+          nt.onclick = () => { window.focus(); go('gardien'); nt.close(); };
+        }
+        if (r.last?.length) localStorage.setItem('erp_guard_notified', String(Math.max(lastId, ...r.last.map((a) => a.id))));
+      } catch { /* notifications indisponibles */ }
+    }).catch(() => {});
+    load();
+    const t = setInterval(load, 60000);
+    const onSeen = () => setD({ unread: 0, grave: 0 });
+    window.addEventListener('guardian-seen', onSeen);
+    return () => { alive = false; clearInterval(t); window.removeEventListener('guardian-seen', onSeen); };
+  }, []);
+  return (
+    <div className="bell">
+      <button className={'icon-btn' + (d.grave > 0 ? ' guard-hot' : '')} onClick={() => go('gardien')} aria-label="Le Gardien" title="Le Gardien — alertes de surveillance">
+        <Ic n="shield" s={19} />{d.unread > 0 && <span className="bell-n">{d.unread}</span>}
+      </button>
+    </div>
+  );
+}

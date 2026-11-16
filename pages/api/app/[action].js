@@ -1,6 +1,7 @@
 import { handler, fail, n } from '../../../lib/api';
 import { q, one } from '../../../lib/db';
 import { can } from '../../../lib/perms';
+import { guardChecks } from '../../../lib/guardian';
 
 // Commandes clients en cours + ce qu'il faut produire. Le stock disponible est réservé aux commandes
 // dans l'ordre des dates de livraison (la plus proche d'abord).
@@ -224,6 +225,29 @@ export default handler(async (req, res, user) => {
       if (co.d !== null && co.d <= 7) out.push({ level: co.d < 3 ? 'red' : 'orange', mod: 'aide', title: co.status === 'essai' ? 'Fin de la période d\'essai' : 'Abonnement', text: co.d < 0 ? 'Expiré' : `Se termine dans ${co.d} jour(s)` });
     }
     return out;
+  }
+
+  // Le Gardien : alertes sur les actions sensibles (direction uniquement)
+  if (action === 'guardian') {
+    if (!c('gardien')) fail('Accès refusé pour votre rôle', 403);
+    await guardChecks(cid);
+    const seen = (await one('SELECT seen_until FROM guardian_seen WHERE user_id=$1', [user.uid]))?.seen_until || '1970-01-01';
+    const unread = await one(`SELECT COUNT(*) AS n, COUNT(*) FILTER (WHERE level='grave') AS g FROM guardian_alerts
+      WHERE company_id=$1 AND created_at > $2 AND level<>'info' AND (actor_id IS DISTINCT FROM $3)`, [cid, seen, user.uid]);
+    if (req.query.count) {
+      const last = await q(`SELECT id,level,title,message FROM guardian_alerts WHERE company_id=$1 AND created_at > $2 AND level<>'info' AND (actor_id IS DISTINCT FROM $3) ORDER BY id DESC LIMIT 5`, [cid, seen, user.uid]);
+      return { unread: Number(unread.n), grave: Number(unread.g), last };
+    }
+    const days = Math.min(Number(req.query.days) || 30, 365);
+    const list = await q(`SELECT id,kind,level,title,message,link_mod,actor_id,actor_name,created_at, created_at > $3 AS new FROM guardian_alerts
+      WHERE company_id=$1 AND created_at > now() - ($2::int * interval '1 day') ORDER BY id DESC LIMIT 500`, [cid, days, seen]);
+    return { list, unread: Number(unread.n), seen_until: seen };
+  }
+  if (action === 'guardian_seen') {
+    if (!c('gardien')) fail('Accès refusé pour votre rôle', 403);
+    if (user.support) return { ok: true };
+    await q('INSERT INTO guardian_seen (user_id,seen_until) VALUES ($1,now()) ON CONFLICT (user_id) DO UPDATE SET seen_until=now()', [user.uid]);
+    return { ok: true };
   }
 
   if (action === 'announcements') {

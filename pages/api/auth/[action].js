@@ -1,4 +1,5 @@
 import bcrypt from 'bcryptjs';
+import { guardLogin } from '../../../lib/guardian';
 import { handler, fail, signToken, verifyToken, setAuthCookie, clearAuthCookie, audit, companyBlock } from '../../../lib/api';
 import { q, one, tx } from '../../../lib/db';
 import { seedCompany } from '../../../lib/seed';
@@ -31,7 +32,9 @@ export default handler(async (req, res) => {
   if (action === 'login') {
     const email = String(b.email || '').trim().toLowerCase();
     const u = await one('SELECT * FROM users WHERE email=$1', [email]);
-    if (!u || !(await bcrypt.compare(String(b.password || ''), u.password_hash))) fail('Email ou mot de passe incorrect', 401);
+    const okPwd = !!u && (await bcrypt.compare(String(b.password || ''), u.password_hash));
+    if (u && !okPwd) await guardLogin(u, false);
+    if (!okPwd) fail('Email ou mot de passe incorrect', 401);
     if (!u.active) fail('Compte désactivé, contactez votre administrateur', 403);
     const c = await one('SELECT status FROM companies WHERE id=$1', [u.company_id]);
     if (c?.status === 'suspendu') fail('Le compte de votre entreprise est suspendu. Contactez Angy Company.', 403);
@@ -39,6 +42,7 @@ export default handler(async (req, res) => {
     const payload = { uid: u.id, cid: u.company_id, role: u.role, name: u.name };
     setAuthCookie(res, await signToken(payload));
     await audit(payload, 'connexion', 'users', u.id);
+    await guardLogin(u, true);
     return { ok: true };
   }
 

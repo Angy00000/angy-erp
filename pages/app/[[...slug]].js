@@ -14,10 +14,11 @@ import Rapports from '../../components/modules/Rapports';
 import Admin from '../../components/modules/Admin';
 import Aide from '../../components/modules/Aide';
 import Imprimes from '../../components/modules/Imprimes';
-import { SearchPalette, Bell, Announcements, PasswordModal, useTheme, waLink, InstallApp, UpdateBanner, WhatsNew } from '../../components/Chrome';
+import Gardien from '../../components/modules/Gardien';
+import { SearchPalette, Bell, Announcements, PasswordModal, useTheme, waLink, InstallApp, UpdateBanner, WhatsNew, GuardBell } from '../../components/Chrome';
 import { CHANGELOG } from '../../lib/changelog';
 
-const VIEWS = { dashboard: Dashboard, ventes: Ventes, caisse: Caisse, stock: Stock, achats: Achats, production: Production, qualite: Qualite, rh: RH, rapports: Rapports, admin: Admin, aide: Aide, imprimes: Imprimes };
+const VIEWS = { dashboard: Dashboard, ventes: Ventes, caisse: Caisse, stock: Stock, achats: Achats, production: Production, qualite: Qualite, rh: RH, rapports: Rapports, admin: Admin, aide: Aide, imprimes: Imprimes, gardien: Gardien };
 const SUBTITLES = {
   dashboard: 'Vue d\'ensemble de l\'activité en temps réel',
   ventes: 'Point de vente, factures, devis, commandes et clients',
@@ -30,6 +31,7 @@ const SUBTITLES = {
   rapports: 'Analyses financières, commerciales, de production et qualité',
   admin: 'Entreprise, utilisateurs, rôles et journal d\'activité',
   imprimes: 'Fiches vierges et états à imprimer, avec votre logo : production, hygiène, stock, ventes, caisse, personnel',
+  gardien: 'Surveille les actions sensibles : annulations, remises, pertes, sorties d\'argent, vendeurs, accès',
   aide: 'Signalez un problème ou proposez une amélioration à l\'équipe Angy Company',
 };
 const initials = (s) => (s || '?').split(/\s+/).filter(Boolean).slice(0, 2).map((x) => x[0].toUpperCase()).join('');
@@ -98,6 +100,7 @@ export default function AppShell() {
           <button className="icon-btn menu-btn" onClick={() => setOpen(true)} aria-label="Menu"><Ic n="menu" s={20} /></button>
           <button className="gsearch" onClick={() => setSearch(true)}><Ic n="search" s={17} /><span>Rechercher…</span><span className="kbd">Ctrl K</span></button>
           <span style={{ flex: 1 }} />
+          {can('gardien') && <GuardBell go={go} />}
           <Bell go={go} />
           <button className="icon-btn" onClick={toggleTheme} aria-label={theme === 'dark' ? 'Mode clair' : 'Mode sombre'} title={theme === 'dark' ? 'Mode clair' : 'Mode sombre'}><Ic n={theme === 'dark' ? 'sun' : 'moon'} s={19} /></button>
         </header>

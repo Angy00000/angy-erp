@@ -16,6 +16,7 @@ const FEATURES = [
   ['🖨️', 'Fiches et étiquettes à votre logo', 'Fiches de production, d\'hygiène, de caisse, bons de commande, factures et étiquettes, prêts à imprimer.'],
   ['👥', 'Équipe, rôles et paie', 'Chaque employé a son accès et ne voit que ce qui le concerne. Pointage, planning et paie.'],
   ['📊', 'Rapports clairs', 'Ventes, marges, trésorerie, rentabilité, stock, qualité — exportables.'],
+  ['⛨', 'Le Gardien', 'Annulations, remises, pertes, sorties d\'argent, vendeurs qui doivent : chaque action sensible est signalée à la direction, avec le nom et l\'heure.'],
   ['🔒', 'Sécurisé, sur tous vos appareils', 'Ordinateur, tablette et téléphone (installable comme une application). Vos données sauvegardées en ligne.'],
 ];
 const FOR = ['Transformation de fruits et jus', 'Boulangeries & pâtisseries', 'Savonneries & cosmétiques', 'Ateliers & petites usines', 'GIE & coopératives', 'Restauration & traiteurs'];

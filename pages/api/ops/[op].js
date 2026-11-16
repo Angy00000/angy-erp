@@ -1,4 +1,5 @@
 import { handler, fail, audit, nextNumber, requireModule, n, r2 } from '../../../lib/api';
+import { guardOp } from '../../../lib/guardian';
 import { tx, q, one } from '../../../lib/db';
 import { stockIn, stockOut, reverseMovements, cashTx, itemStock, today } from '../../../lib/stock';
 
@@ -615,5 +616,6 @@ export default handler(async (req, res, user) => {
   if (!list.some((m) => { try { requireModule(user, m); return true; } catch { return false; } })) fail('Accès refusé pour votre rôle', 403);
   const out = await tx((t) => fn(t, user, req.body || {}));
   await audit(user, req.query.op, 'operation', req.body?.id || req.body?.lot_id || req.body?.item_id, req.body);
+  await guardOp(user, req.query.op, req.body || {}, out);
   return out ?? { ok: true };
 });
