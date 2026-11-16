@@ -8,7 +8,8 @@ export const REQ_TYPES = { probleme: ['Un problème', 'red'], suggestion: ['Une 
 export const REQ_STATUS = { nouvelle: ['Envoyée', 'amber'], en_cours: ['En cours', 'blue'], faite: ['Réglée', 'green'], refusee: ['Non retenue', 'gray'] };
 
 const GUIDE = [
-  ['Enregistrer une production', 'Production → ⚡ Production rapide → choisir le jus, les litres (et éventuellement + Ajouter un autre format pour les bouteilles), les dépenses → Enregistrer.'],
+  ['Enregistrer une production', 'Production → ⚡ Production rapide → 1) le jus et les litres (+ Ajouter un autre format pour les bouteilles) → 2) ce qu\'on a pris dans le magasin (bissap, sucre, sachets…) : c\'est retiré du stock automatiquement → 3) les autres dépenses (gaz, transport…) → Enregistrer.'],
+  ['Enregistrer un achat de matières', 'Stock & Articles → ⬇ Entrée stock → l\'article, la quantité et le prix payé. Le stock augmente.'],
   ['Vendre', 'Ventes & Clients → Point de vente → toucher les produits → choisir Caisse / Wave / Orange Money → Encaisser la vente.'],
   ['Enregistrer une dépense', 'Caisse & Trésorerie → Dépenses → + Nouvelle dépense. Vous pouvez la rattacher à une production.'],
   ['Voir le bénéfice d\'une production', 'Production → Rentabilité par production → Détail.'],

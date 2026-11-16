@@ -325,10 +325,23 @@ function ProdDetail({ id, onClose }) {
   );
 }
 
+const USED_TYPES = ['mp', 'emballage', 'consommable', 'semi_fini'];
+const itemCost = (it) => Number(it?.cost_price) || Number(it?.purchase_price) || 0;
+
 function QuickProd({ onClose }) {
   const products = useRefOptions('items', { type: 'pf', active: true });
+  const { data: allItems } = useData(() => crud.list('items', { active: true, limit: 1000 }), []);
+  const stockItems = (allItems || []).filter((x) => USED_TYPES.includes(x.type));
   const [d, setD] = useState({ date: today() });
   const [rows, setRows] = useState([{}]);
+  const [usedRows, setUsedRows] = useState([{}]);
+  const setUsed = (i, patch) => setUsedRows((r) => r.map((x, j) => (j === i ? { ...x, ...patch } : x)));
+  const usedCalc = usedRows.map((r) => {
+    const it = stockItems.find((x) => x.id === Number(r.item_id));
+    const q = Number(r.qty) || 0;
+    return { it, q, value: it ? q * itemCost(it) : 0, short: it && q > Number(it.stock) + 1e-9 };
+  });
+  const material = usedCalc.reduce((s, c) => s + c.value, 0);
   const [err, setErr] = useState(null);
   const [busy, setBusy] = useState(false);
   const set = (k) => (e) => setD((x) => ({ ...x, [k]: e.target.value }));
@@ -340,7 +353,7 @@ function QuickProd({ onClose }) {
     return { p, uv, qty, liters: uv ? qty * uv : 0 };
   });
   const valid = calc.filter((c) => c.p && c.qty > 0);
-  const total = (Number(d.expense_cost) || 0) + (Number(d.labor_cost) || 0);
+  const total = material + (Number(d.expense_cost) || 0) + (Number(d.labor_cost) || 0);
   const totalL = valid.reduce((s, c) => s + c.liters, 0);
   const byLiters = valid.length > 0 && valid.every((c) => c.liters > 0);
   const totalQ = valid.reduce((s, c) => s + c.qty, 0);
@@ -356,7 +369,7 @@ function QuickProd({ onClose }) {
   const submit = async () => {
     setErr(null); setBusy(true);
     try {
-      const r = await op('prod_simple', { ...d, lines: rows.filter((x) => x.product_id) });
+      const r = await op('prod_simple', { ...d, lines: rows.filter((x) => x.product_id), consumptions: usedRows.filter((x) => x.item_id && Number(x.qty) > 0) });
       toast(`Production enregistrée : ${r.number}`);
       onClose(r);
     } catch (e) { setErr(e.message); } finally { setBusy(false); }
@@ -390,20 +403,54 @@ function QuickProd({ onClose }) {
       </table></div>
       <button className="btn sm" style={{ marginTop: 8 }} onClick={suggest}>+ Ajouter un autre format (bouteille, sachet…)</button>
 
-      <h3 style={{ fontSize: 14, margin: '18px 0 8px' }}>Ce que la production a coûté</h3>
+      <h3 style={{ fontSize: 14, margin: '20px 0 4px' }}>1. Ce qu'on a pris dans le magasin</h3>
+      <div className="muted small" style={{ marginBottom: 8 }}>Matières premières et emballages déjà en stock (bissap, sucre, sachets, bouteilles…). Ils seront <b>retirés du stock</b> et leur prix d'achat compté dans le coût.</div>
+      <div className="table-wrap"><table className="lines">
+        <thead><tr><th style={{ minWidth: 240 }}>Article</th><th>En stock</th><th style={{ width: 150 }}>Quantité utilisée</th><th className="r">Valeur</th><th /></tr></thead>
+        <tbody>{usedRows.map((r, i) => {
+          const c = usedCalc[i];
+          const taken = usedRows.map((x, j) => (j !== i ? Number(x.item_id) : null));
+          return (
+            <tr key={i}>
+              <td><select className="input" value={r.item_id || ''} onChange={(e) => setUsed(i, { item_id: e.target.value ? Number(e.target.value) : '', qty: '' })}>
+                <option value="">— Choisir —</option>
+                {Object.entries({ mp: 'Matières premières', emballage: 'Emballages', consommable: 'Consommables', semi_fini: 'Semi-finis' }).map(([t, l]) => {
+                  const list = stockItems.filter((x) => x.type === t && !taken.includes(x.id));
+                  return list.length ? <optgroup key={t} label={l}>{list.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</optgroup> : null;
+                })}
+              </select></td>
+              <td className={'small ' + (c.it && Number(c.it.stock) <= 0 ? 'neg strong' : 'muted')} style={{ whiteSpace: 'nowrap' }}>{c.it ? `${num(c.it.stock)} ${c.it.unit || ''}` : '—'}</td>
+              <td><input type="number" step="any" className="input" placeholder={c.it?.unit || 'Quantité'} value={r.qty || ''} onChange={(e) => setUsed(i, { qty: e.target.value })} disabled={!c.it} />
+                {c.short && <div className="neg small strong">Stock insuffisant</div>}</td>
+              <td className="r mono">{c.q > 0 ? (itemCost(c.it) ? money(c.value) : <span className="muted small">prix d'achat non renseigné</span>) : ''}</td>
+              <td>{usedRows.length > 1 && <button className="btn sm ghost" onClick={() => setUsedRows((x) => x.filter((_, j) => j !== i))}>✕</button>}</td>
+            </tr>
+          );
+        })}</tbody>
+        {material > 0 && <tfoot><tr><td colSpan={3} className="strong">Valeur prise dans le stock</td><td className="r mono strong">{money(material)}</td><td /></tr></tfoot>}
+      </table></div>
+      <button className="btn sm" style={{ marginTop: 8 }} onClick={() => setUsedRows((r) => [...r, {}])}>+ Ajouter un article du magasin</button>
+      {!stockItems.length && allItems && <div className="note" style={{ marginTop: 8 }}>Aucune matière ni emballage enregistré. Créez-les dans <b>Stock & Articles</b> puis faites une <b>Entrée stock</b> : ils apparaîtront ici.</div>}
+
+      <h3 style={{ fontSize: 14, margin: '20px 0 4px' }}>2. Les autres dépenses</h3>
+      <div className="muted small" style={{ marginBottom: 8 }}>Ce qui a été payé et <b>n'est pas dans le magasin</b> : gaz, eau, transport, achats faits le jour même…</div>
       <div className="form">
-        <div className="field"><label>Dépenses de production (FCFA) <span className="req">*</span></label><input type="number" step="any" className="input" value={d.expense_cost || ''} onChange={set('expense_cost')} placeholder="Ingrédients, sucre, sachets, bouteilles, gaz…" /></div>
+        <div className="field"><label>Autres dépenses (FCFA)</label><input type="number" step="any" className="input" value={d.expense_cost || ''} onChange={set('expense_cost')} placeholder="0" /></div>
         <div className="field"><label>Main-d'œuvre (optionnel)</label><input type="number" step="any" className="input" value={d.labor_cost || ''} onChange={set('labor_cost')} /></div>
+        <div className="field"><label>Autres dépenses payées depuis (optionnel)</label><RefSelect f={{ ref: 'accounts', params: { active: true }, placeholder: 'Ne pas toucher à la caisse' }} value={d.account_id} onChange={(v) => setD((x) => ({ ...x, account_id: v }))} /></div>
+      </div>
+
+      <h3 style={{ fontSize: 14, margin: '20px 0 8px' }}>3. Informations du lot</h3>
+      <div className="form">
         <div className="field"><label>Date de production</label><input type="date" className="input" value={d.date} onChange={set('date')} /></div>
-        <div className="field"><label>Dépenses payées depuis (optionnel)</label><RefSelect f={{ ref: 'accounts', params: { active: true }, placeholder: 'Ne pas toucher à la caisse' }} value={d.account_id} onChange={(v) => setD((x) => ({ ...x, account_id: v }))} /></div>
         <div className="field"><label>N° de lot (optionnel)</label><input className="input" value={d.lot_number || ''} onChange={set('lot_number')} placeholder="Automatique" /></div>
         <div className="field"><label>Date limite (DLC)</label><input type="date" className="input" value={d.expiry_date || ''} onChange={set('expiry_date')} /></div>
         <div className="field full"><label>Note</label><input className="input" value={d.notes || ''} onChange={set('notes')} /></div>
       </div>
       {valid.length > 0 && total > 0 && (
         <div className="grid g3" style={{ marginTop: 16 }}>
-          <Stat k="Volume total" v={totalL ? `${num(totalL)} L` : `${num(totalQ)} unités`} s={valid.map((c) => `${num(c.qty)} ${c.p.unit}`).join(' + ')} />
-          <Stat k="Coût par litre" v={totalL ? money(total / totalL) : '—'} />
+          <Stat k="Coût total de la production" v={money(total)} s={[material > 0 && `stock ${money(material)}`, Number(d.expense_cost) > 0 && `dépenses ${money(d.expense_cost)}`, Number(d.labor_cost) > 0 && `main-d'œuvre ${money(d.labor_cost)}`].filter(Boolean).join(' + ')} />
+          <Stat k="Coût par litre" v={totalL ? money(total / totalL) : '—'} s={totalL ? `${num(totalL)} L produits` : `${num(totalQ)} unités`} />
           <Stat accent k="Ventes prévues" v={money(valid.reduce((s, c) => s + c.qty * (Number(c.p.sale_price) || 0), 0))} s={`Bénéfice prévu : ${money(valid.reduce((s, c) => s + c.qty * (Number(c.p.sale_price) || 0), 0) - total)}`} />
         </div>
       )}
