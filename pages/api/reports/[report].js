@@ -96,6 +96,21 @@ const REPORTS = {
       out.prod_month = await one(`SELECT COALESCE(SUM(produced_qty),0) AS produced, COALESCE(SUM(rejected_qty),0) AS rejected, COUNT(*) AS orders
         FROM production_orders WHERE company_id=$1 AND status='termine' AND finished_at>=$2`, [cid, m]);
     }
+    if (show('production') || show('rapports')) {
+      const rows = await profitRows(cid, 'po.finished_at::date BETWEEN $2 AND $3', [m, t]);
+      out.month_prod = {
+        count: rows.length,
+        cost: rows.reduce((a, r) => a + r.real_cost, 0),
+        revenue: rows.reduce((a, r) => a + n(r.revenue), 0),
+        profit: rows.reduce((a, r) => a + r.profit, 0),
+        projected: rows.reduce((a, r) => a + r.projected_profit, 0),
+        rows: rows.slice(0, 6).map((r) => ({ id: r.id, number: r.number, product: r.product, unit: r.unit, date: r.date, produced_qty: r.produced_qty, sold_qty: r.sold_qty, real_cost: r.real_cost, revenue: r.revenue, profit: r.profit, sold_pct: r.sold_pct })),
+      };
+    }
+    if (show('stock') || show('ventes') || show('production')) {
+      out.pf_stock = await q(`SELECT i.id, i.name, i.unit, i.sale_price, COALESCE(SUM(l.qty),0) AS stock FROM items i LEFT JOIN lots l ON l.item_id=i.id AND l.status='ok'
+        WHERE i.company_id=$1 AND i.type='pf' AND i.active GROUP BY i.id ORDER BY stock DESC, i.name LIMIT 12`, [cid]);
+    }
     if (show('qualite')) {
       out.quality = await one(`SELECT (SELECT COUNT(*) FROM nonconformities WHERE company_id=$1 AND status<>'cloturee') AS open_nc,
         (SELECT COUNT(*) FROM lots WHERE company_id=$1 AND status IN ('quarantaine','bloque') AND qty>0) AS blocked_lots,

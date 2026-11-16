@@ -20,11 +20,11 @@ async function payDoc(t, user, doc, b) {
 async function validateSale(t, user, doc) {
   if (doc.status !== 'brouillon') fail('Document déjà validé');
   const lines = await t.q('SELECT * FROM sales_lines WHERE doc_id=$1', [doc.id]);
-  if (!lines.length) fail('Ajoutez au moins une ligne');
+  if (!lines.some((l) => n(l.qty) > 0)) fail('Ajoutez au moins une ligne avec une quantité');
   let cost = 0;
   if (doc.type === 'facture') {
     for (const l of lines) {
-      if (!l.item_id) continue;
+      if (!l.item_id || n(l.qty) <= 0) continue;
       const out = await stockOut(t, user, { item_id: l.item_id, qty: l.qty, type: 'vente', ref_type: 'sales_docs', ref_id: doc.id, note: doc.number });
       const uc = n(l.qty) ? out.cost / n(l.qty) : 0;
       await t.q('UPDATE sales_lines SET unit_cost=$1 WHERE id=$2', [uc, l.id]);
