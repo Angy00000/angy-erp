@@ -49,14 +49,16 @@ export async function openOrders(cid) {
 export async function buyList(cid, days = 14) {
   const rows = await q(`SELECT i.id, i.name, i.type, i.unit, i.min_stock, i.cost_price,
       COALESCE((SELECT SUM(qty) FROM lots l WHERE l.item_id=i.id AND l.status='ok'),0) AS stock,
-      COALESCE((SELECT -SUM(m.qty) FROM stock_movements m WHERE m.item_id=i.id AND m.qty<0 AND m.type NOT IN ('transfert','annulation','inventaire') AND m.created_at > now() - interval '30 days'),0) AS used,
-      (SELECT MIN(m.created_at) FROM stock_movements m WHERE m.item_id=i.id) AS first_move,
+      COALESCE((SELECT -SUM(m.qty) FROM stock_movements m LEFT JOIN production_orders po ON m.ref_type='production_orders' AND po.id=m.ref_id
+        WHERE m.item_id=i.id AND m.qty<0 AND m.type NOT IN ('transfert','annulation','inventaire') AND COALESCE(po.planned_date, m.created_at::date) > current_date - 30),0) AS used,
+      (SELECT MIN(COALESCE(po.planned_date, m.created_at::date)) FROM stock_movements m LEFT JOIN production_orders po ON m.ref_type='production_orders' AND po.id=m.ref_id WHERE m.item_id=i.id) AS first_move,
       (SELECT l.unit_cost FROM lots l WHERE l.item_id=i.id AND l.source_type IN ('purchases','achat_marche','reception') ORDER BY l.id DESC LIMIT 1) AS last_cost,
       (SELECT s.name FROM lots l JOIN suppliers s ON s.id=l.supplier_id WHERE l.item_id=i.id ORDER BY l.id DESC LIMIT 1) AS last_supplier
     FROM items i WHERE i.company_id=$1 AND i.active AND i.type IN ('mp','emballage','consommable')`, [cid]);
   const now = Date.now();
   return rows.map((r) => {
-    const span = r.first_move ? Math.min(30, Math.max(3, (now - new Date(r.first_move).getTime()) / 86400000)) : 30;
+    // Jours couverts : depuis la première utilisation (date de la production, pas de la saisie), entre 3 et 30 jours
+    const span = r.first_move ? Math.min(30, Math.max(3, Math.floor((now - new Date(String(r.first_move).slice(0, 10) + 'T00:00:00Z').getTime()) / 86400000) + 1)) : 30;
     const perDay = n(r.used) / span;
     const stock = n(r.stock);
     const daysLeft = perDay > 0 ? stock / perDay : null;
