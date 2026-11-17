@@ -537,6 +537,77 @@ const OPS = {
     await t.q("UPDATE sales_docs SET status='transforme' WHERE id=$1", [doc.id]);
     return nd;
   }],
+  // Corriger une vente déjà enregistrée : produits, quantités, prix, client, date, remise et montant reçu.
+  // Le stock, la caisse, la créance et le bénéfice sont recalculés.
+  sale_edit: [['ventes', 'caisse'], async (t, user, b) => {
+    const doc = await getDoc(t, user, b.id);
+    if (doc.type !== 'facture') fail('Seule une facture (vente) peut être corrigée ici');
+    if (!['valide', 'partiel', 'paye'].includes(doc.status)) fail('Cette vente ne peut pas être corrigée (annulée, transformée ou brouillon)');
+    if (doc.channel === 'depot') fail('Vente issue d\'un retour de vendeur : elle ne peut pas être corrigée ici');
+    if (doc.parent_id) {
+      const par = await t.one('SELECT type FROM sales_docs WHERE id=$1', [doc.parent_id]);
+      if (par?.type === 'commande') fail('Facture de livraison d\'une commande : annulez-la puis refaites la livraison');
+    }
+    const lines = (b.lines || []).filter((l) => Number(l.item_id) && n(l.qty) > 0);
+    if (!lines.length) fail('Gardez au moins un produit avec une quantité (sinon annulez la vente)');
+    if (lines.some((l) => n(l.unit_price) < 0)) fail('Prix invalide');
+    const date = b.date || doc.date;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(date))) fail('Date invalide');
+    if (date > today()) fail('La date ne peut pas être dans le futur');
+    const old = { total: n(doc.total), paid: n(doc.paid), date: doc.date };
+
+    // 1. Remettre en stock ce qui était sorti pour cette vente
+    const moves = await t.q("SELECT * FROM stock_movements WHERE company_id=$1 AND ref_type='sales_docs' AND ref_id=$2", [user.cid, doc.id]);
+    for (const m of moves) {
+      if (m.lot_id) await t.q('UPDATE lots SET qty=qty-$1 WHERE id=$2', [n(m.qty), m.lot_id]);
+      await t.q(`INSERT INTO stock_movements (company_id,item_id,lot_id,warehouse_id,type,qty,unit_cost,ref_type,ref_id,note,user_id)
+        VALUES ($1,$2,$3,$4,'correction',$5,$6,'sales_docs_corrige',$7,$8,$9)`, [user.cid, m.item_id, m.lot_id, m.warehouse_id, -n(m.qty), n(m.unit_cost), doc.id, `Correction ${doc.number}`, user.uid]);
+    }
+    await t.q("UPDATE stock_movements SET ref_type='sales_docs_corrige' WHERE company_id=$1 AND ref_type='sales_docs' AND ref_id=$2", [user.cid, doc.id]);
+
+    // 2. Nouvelles lignes, puis nouvelle sortie de stock (même logique qu'une vente normale)
+    await t.q('DELETE FROM sales_lines WHERE doc_id=$1', [doc.id]);
+    for (const l of lines) {
+      const it = await t.one('SELECT id FROM items WHERE id=$1 AND company_id=$2', [l.item_id, user.cid]);
+      if (!it) fail('Produit introuvable');
+      await t.q('INSERT INTO sales_lines (doc_id,item_id,qty,unit_price,discount,total,lot_id) VALUES ($1,$2,$3,$4,$5,$6,$7)',
+        [doc.id, it.id, n(l.qty), n(l.unit_price), n(l.discount), r2(n(l.qty) * n(l.unit_price) - n(l.discount)), l.lot_id ? Number(l.lot_id) : null]);
+    }
+    const subtotal = r2(lines.reduce((s, l) => s + n(l.qty) * n(l.unit_price) - n(l.discount), 0));
+    const discount = b.discount === undefined ? n(doc.discount) : n(b.discount);
+    const total = r2(subtotal - discount + n(doc.tax));
+    if (total < 0) fail('La remise dépasse le montant de la vente');
+    const customer = b.customer_id === undefined ? doc.customer_id : (Number(b.customer_id) || doc.customer_id);
+    await t.q("UPDATE sales_docs SET customer_id=$1, date=$2, subtotal=$3, discount=$4, total=$5, status='brouillon' WHERE id=$6", [customer, date, subtotal, discount, total, doc.id]);
+    await validateSale(t, user, { ...doc, customer_id: customer, total, status: 'brouillon' });
+
+    // 3. Argent reçu : on complète ou on rend la différence
+    const newPaid = Math.min(r2(b.paid === undefined || b.paid === '' || b.paid === null ? Math.min(old.paid, total) : n(b.paid)), total);
+    if (newPaid < 0) fail('Montant reçu invalide');
+    let diff = r2(newPaid - old.paid);
+    const pays = await t.q("SELECT * FROM payments WHERE doc_type='sales_docs' AND doc_id=$1 AND direction='in' ORDER BY date DESC, id DESC", [doc.id]);
+    if (diff > 0.009) {
+      const acc = b.account_id || pays[0]?.account_id;
+      if (!acc) fail('Choisissez où l\'argent est reçu');
+      await t.q(`INSERT INTO payments (company_id,direction,party_type,party_id,doc_type,doc_id,account_id,amount,date,method,reference,user_id)
+        VALUES ($1,'in','customer',$2,'sales_docs',$3,$4,$5,$6,NULL,'Correction de vente',$7)`, [user.cid, customer, doc.id, acc, diff, today(), user.uid]);
+      await cashTx(t, user, { account_id: acc, amount: diff, category: 'Vente', label: `Correction ${doc.number} (complément)`, ref_type: 'sales_docs', ref_id: doc.id });
+    } else if (diff < -0.009) {
+      let back = -diff;
+      for (const p of pays) {
+        if (back <= 0.009) break;
+        const take = Math.min(back, n(p.amount));
+        if (take >= n(p.amount) - 0.009) await t.q('DELETE FROM payments WHERE id=$1', [p.id]);
+        else await t.q('UPDATE payments SET amount=amount-$1 WHERE id=$2', [take, p.id]);
+        await cashTx(t, user, { account_id: p.account_id, amount: -take, category: 'Correction vente', label: `Correction ${doc.number} (rendu au client)`, ref_type: 'sales_docs', ref_id: doc.id });
+        back = r2(back - take);
+      }
+    }
+    if (customer !== doc.customer_id) await t.q('UPDATE payments SET party_id=$1 WHERE doc_type=\'sales_docs\' AND doc_id=$2', [customer, doc.id]);
+    const status = total <= 0.009 || newPaid >= total - 0.01 ? 'paye' : newPaid > 0 ? 'partiel' : 'valide';
+    await t.q('UPDATE sales_docs SET paid=$1, status=$2 WHERE id=$3', [newPaid, status, doc.id]);
+    return { id: doc.id, number: doc.number, old_total: old.total, total, old_paid: old.paid, paid: newPaid, old_date: old.date, date };
+  }],
   // Changer la date d'un encaissement (et la ligne de trésorerie qui va avec)
   payment_date: [['ventes', 'caisse'], async (t, user, b) => {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(String(b.date || ''))) fail('Date invalide');

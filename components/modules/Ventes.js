@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { op, crud, money, num, date, opts, today, LABELS } from '../../lib/client';
-import { Tabs, Badge, useRefOptions, useData, run, confirmDo, invalidateRefs, toast } from '../ui';
+import { Tabs, Badge, Modal, useRefOptions, useData, run, confirmDo, invalidateRefs, toast } from '../ui';
 import Commandes from './Commandes';
 import Depots from './Depots';
 import Dettes from './Dettes';
@@ -59,6 +59,7 @@ function POS() {
   const [day, setDay] = useState(today());
   const [busy, setBusy] = useState(false);
   const [last, setLast] = useState(null);
+  const [fix, setFix] = useState(null);
 
   const sellable = items.filter((i) => (i.type === 'pf' || i.type === 'service' || i.type === 'semi_fini' || Number(i.sale_price) > 0) && (!q || i.name.toLowerCase().includes(q.toLowerCase()) || (i.code || '').toLowerCase().includes(q.toLowerCase()) || i.barcode === q));
   const price = (i) => (tier === 'gros' && Number(i.wholesale_price) > 0 ? Number(i.wholesale_price) : Number(i.sale_price));
@@ -154,7 +155,8 @@ function POS() {
         {paid !== '' && Number(paid) > total && <div className="note" style={{ marginTop: 8 }}>Monnaie à rendre : {money(Number(paid) - total)}</div>}
         <div className="space" />
         <button className="btn accent" style={{ width: '100%', justifyContent: 'center', fontSize: 16, minHeight: 48 }} disabled={busy || !cart.length} onClick={checkout}>{busy ? 'Enregistrement…' : 'Encaisser la vente'}</button>
-        {last && <div style={{ marginTop: 12 }} className="row"><span className="small muted">Dernière vente : {last.number}</span><a className="btn sm" href={`/print/sales_docs/${last.id}`} target="_blank" rel="noreferrer">Imprimer le reçu</a></div>}
+        {last && <div style={{ marginTop: 12 }} className="row"><span className="small muted">Dernière vente : {last.number}</span><a className="btn sm" href={`/print/sales_docs/${last.id}`} target="_blank" rel="noreferrer">Imprimer le reçu</a><button className="btn sm" onClick={() => setFix(last.id)}>✏️ Corriger</button></div>}
+        {fix && <SaleEdit id={fix} onClose={(ok) => { setFix(null); if (ok) { invalidateRefs('items'); invalidateRefs('accounts'); setRefresh((x) => x + 1); } }} />}
       </div>
     </div>
   );
@@ -197,6 +199,7 @@ function Docs() {
             <a className="btn sm" href={`/print/sales_docs/${r.id}`} target="_blank" rel="noreferrer">Imprimer</a>
             {r.status === 'brouillon' && <button className="btn sm primary" onClick={() => confirmDo(r.type === 'facture' ? 'Valider la facture ? Le stock sera déduit.' : 'Valider ce document ?') && act(() => op('sale_validate', { id: r.id }), 'Document validé', reload)}>Valider</button>}
             {r.type === 'facture' && ['valide', 'partiel'].includes(r.status) && <button className="btn sm accent" onClick={() => setModal({ kind: 'pay', row: r, reload })}>Encaisser</button>}
+            {canFix(r) && <button className="btn sm" onClick={() => setModal({ kind: 'fix', row: r, reload })}>✏️ Corriger</button>}
             {r.type === 'devis' && ['brouillon', 'valide'].includes(r.status) && <button className="btn sm" onClick={() => act(() => op('sale_convert', { id: r.id, to: 'commande' }), 'Bon de commande créé', reload)}>→ Commande</button>}
             {['devis', 'commande'].includes(r.type) && ['brouillon', 'valide'].includes(r.status) && <button className="btn sm" onClick={() => act(() => op('sale_convert', { id: r.id, to: 'facture' }), 'Facture créée (brouillon)', reload)}>→ Facture</button>}
             {r.paid > 0 && <button className="btn sm danger" onClick={() => confirmDo('Rembourser tous les encaissements de ce document ?') && act(() => op('sale_refund', { id: r.id }), 'Paiements remboursés', reload)}>Rembourser</button>}
@@ -204,6 +207,7 @@ function Docs() {
           </>
         )}
       />
+      {modal?.kind === 'fix' && <SaleEdit id={modal.row.id} onClose={(ok) => { const rl = modal.reload; setModal(null); if (ok) { invalidateRefs('items'); invalidateRefs('accounts'); rl(); } }} />}
       {modal?.kind === 'pay' && (
         <ActionModal title={`Encaisser ${modal.row.number}`} initial={{ amount: modal.row.total - modal.row.paid, date: today() }}
           fields={[{ k: 'amount', l: 'Montant', t: 'number', req: true }, accountField, { k: 'date', l: 'Date', t: 'date' }, { k: 'reference', l: 'Référence (n° transaction…)', t: 'text' }]}
@@ -256,5 +260,84 @@ function Payments() {
         </ActionModal>
       )}
     </>
+  );
+}
+
+const canFix = (r) => r.type === 'facture' && ['valide', 'partiel', 'paye'].includes(r.status) && r.channel !== 'depot';
+
+// Corriger une vente déjà enregistrée : le stock, la caisse et ce que doit le client se recalculent.
+export function SaleEdit({ id, onClose }) {
+  const { data: doc } = useData(() => crud.get('sales_docs', id), [id]);
+  const items = useRefOptions('items', { active: true });
+  const customers = useRefOptions('customers', {});
+  const accounts = useRefOptions('accounts', { active: true });
+  const [f, setF] = useState(null);
+  const [err, setErr] = useState(null);
+  const [busy, setBusy] = useState(false);
+  if (doc && !f) {
+    const wasPaid = Number(doc.paid) >= Number(doc.total) - 0.01;
+    setF({ customer_id: doc.customer_id || '', date: String(doc.date).slice(0, 10), discount: String(Number(doc.discount) || ''), follow: wasPaid, paid: String(Number(doc.paid)), account_id: '',
+      lines: (doc.lines || []).map((l) => ({ item_id: l.item_id, qty: String(Number(l.qty)), unit_price: String(Number(l.unit_price)), discount: Number(l.discount) || 0, lot_id: l.lot_id || '' })) });
+    return null;
+  }
+  if (!doc || !f) return <Modal title="Corriger la vente" onClose={() => onClose(false)}><div className="spinner">Chargement…</div></Modal>;
+  const sellable = items.filter((i) => i.type === 'pf' || i.type === 'service' || i.type === 'semi_fini' || Number(i.sale_price) > 0);
+  const nameOf = (iid) => items.find((i) => i.id === Number(iid))?.name || doc.lines.find((l) => l.item_id === Number(iid))?.item_name || '';
+  const subtotal = f.lines.reduce((s2, l) => s2 + (Number(l.qty) || 0) * (Number(l.unit_price) || 0) - (Number(l.discount) || 0), 0);
+  const total = Math.round((subtotal - (Number(f.discount) || 0) + Number(doc.tax || 0)) * 100) / 100;
+  const paid = f.follow ? Math.max(total, 0) : Math.min(Number(f.paid) || 0, total);
+  const diff = Math.round((paid - Number(doc.paid)) * 100) / 100;
+  const setLine = (i, v) => setF({ ...f, lines: f.lines.map((l, j) => (j === i ? { ...l, ...v } : l)) });
+  const save = async () => {
+    setErr(null); setBusy(true);
+    try {
+      const r = await op('sale_edit', { id, customer_id: f.customer_id || null, date: f.date, discount: Number(f.discount) || 0, paid, account_id: f.account_id || undefined,
+        lines: f.lines.filter((l) => l.item_id && Number(l.qty) > 0).map((l) => ({ item_id: Number(l.item_id), qty: Number(l.qty), unit_price: Number(l.unit_price) || 0, discount: Number(l.discount) || 0, lot_id: l.lot_id || null })) });
+      toast(`Vente ${r.number} corrigée`); onClose(true);
+    } catch (e) { setErr(e.message); } finally { setBusy(false); }
+  };
+  return (
+    <Modal title={`Corriger la vente ${doc.number}`} wide onClose={() => onClose(false)}
+      footer={<><button className="btn" onClick={() => onClose(false)}>Annuler</button><button className="btn primary" disabled={busy} onClick={save}>{busy ? 'Enregistrement…' : 'Enregistrer la correction'}</button></>}>
+      {err && <div className="err">{err}</div>}
+      <div className="note" style={{ marginBottom: 12 }}>Changez ce qui est faux. Le stock, la caisse et ce que doit le client seront recalculés. Pour supprimer toute la vente, utilisez plutôt <b>Annuler</b>.</div>
+      <div className="table-wrap"><table className="t">
+        <thead><tr><th>Produit</th><th className="r" style={{ width: 110 }}>Quantité</th><th className="r" style={{ width: 130 }}>Prix unitaire</th><th className="r">Total</th><th style={{ width: 40 }} /></tr></thead>
+        <tbody>{f.lines.map((l, i) => (
+          <tr key={i}>
+            <td><select className="input" value={l.item_id} onChange={(e) => { const it = items.find((x) => x.id === Number(e.target.value)); setLine(i, { item_id: e.target.value, lot_id: '', unit_price: it ? String(Number(it.sale_price) || 0) : l.unit_price }); }}>
+              <option value="">— Produit —</option>
+              {!sellable.some((x) => x.id === Number(l.item_id)) && l.item_id && <option value={l.item_id}>{nameOf(l.item_id)}</option>}
+              {sellable.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
+            </select></td>
+            <td><input className="input r" type="number" min="0" step="any" value={l.qty} onChange={(e) => setLine(i, { qty: e.target.value })} /></td>
+            <td><input className="input r" type="number" min="0" step="any" value={l.unit_price} onChange={(e) => setLine(i, { unit_price: e.target.value })} /></td>
+            <td className="r nw strong">{money((Number(l.qty) || 0) * (Number(l.unit_price) || 0) - (Number(l.discount) || 0))}</td>
+            <td><button className="btn sm ghost" title="Retirer" onClick={() => setF({ ...f, lines: f.lines.filter((_, j) => j !== i) })}>✕</button></td>
+          </tr>
+        ))}</tbody>
+      </table></div>
+      <button className="link-btn" style={{ margin: '8px 0 14px' }} onClick={() => setF({ ...f, lines: [...f.lines, { item_id: '', qty: '1', unit_price: '', discount: 0, lot_id: '' }] })}>+ Ajouter un produit</button>
+      <div className="form" style={{ gridTemplateColumns: '1fr 1fr 1fr' }}>
+        <div className="field"><label>Client</label><select className="input" value={f.customer_id} onChange={(e) => setF({ ...f, customer_id: e.target.value })}>
+          {customers.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></div>
+        <div className="field"><label>Date de la vente</label><input className="input" type="date" max={today()} value={f.date} onChange={(e) => setF({ ...f, date: e.target.value })} /></div>
+        <div className="field"><label>Remise</label><input className="input" type="number" min="0" value={f.discount} placeholder="0" onChange={(e) => setF({ ...f, discount: e.target.value })} /></div>
+        <div className="field"><label>Argent reçu du client</label>
+          <label className="row small" style={{ gap: 6, margin: '2px 0 6px' }}><input type="checkbox" checked={f.follow} onChange={(e) => setF({ ...f, follow: e.target.checked, paid: String(paid) })} /> Le client a tout payé</label>
+          {!f.follow && <input className="input" type="number" min="0" value={f.paid} onChange={(e) => setF({ ...f, paid: e.target.value })} />}</div>
+        {diff > 0.009 && <div className="field"><label>Compte où l'argent est reçu</label><select className="input" value={f.account_id} onChange={(e) => setF({ ...f, account_id: e.target.value })}>
+          <option value="">Même compte que la vente</option>{accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}</select></div>}
+      </div>
+      <div className="fix-sum">
+        <div><span className="muted small">Avant</span><b>{money(doc.total)}</b><span className="small muted">payé {money(doc.paid)}</span></div>
+        <div className="arrow">→</div>
+        <div><span className="muted small">Après</span><b>{money(total)}</b><span className="small muted">payé {money(paid)}</span></div>
+        <div className="grow" />
+        {diff > 0.009 && <div className="badge green">Le client donne encore {money(diff)}</div>}
+        {diff < -0.009 && <div className="badge amber">À rendre au client : {money(-diff)}</div>}
+        {total - paid > 0.009 && <div className="badge red">Reste dû : {money(total - paid)}</div>}
+      </div>
+    </Modal>
   );
 }

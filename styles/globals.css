@@ -928,3 +928,9 @@ table.t { width: 100%; border-collapse: collapse; }
 .share.sm { height: 18px; } .share.sm span { line-height: 18px; font-weight: 600; color: var(--ink-3); }
 tr.clickable { cursor: pointer; } tr.clickable:hover td { background: var(--surface-2); }
 tr.best-row td { background: var(--green-soft, rgba(30,140,80,.08)); }
+
+/* Corriger une vente */
+.fix-sum{display:flex;align-items:center;gap:16px;flex-wrap:wrap;margin-top:14px;padding:12px 14px;border:1px solid var(--line);border-radius:12px;background:var(--bg-soft,rgba(0,0,0,.02))}
+.fix-sum>div:not(.badge):not(.grow):not(.arrow){display:flex;flex-direction:column;gap:2px}
+.fix-sum b{font-size:18px}
+.fix-sum .arrow{font-size:20px;color:var(--muted)}
