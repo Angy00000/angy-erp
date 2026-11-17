@@ -150,6 +150,25 @@ const REPORTS = {
     };
   }],
 
+  // Ventes et bénéfice par produit et par format (jus de bissap : sachet / 25 cl / 1 L…)
+  by_product: [['rapports', 'ventes'], async (cid, qs) => {
+    const from = qs.from || monthStart(), to = qs.to || today();
+    const p = [cid, from, to];
+    const w = `d.company_id=$1 AND ${SALES_OK} AND d.date BETWEEN $2 AND $3`;
+    return {
+      from, to,
+      items: await q(`SELECT i.id, i.name, i.unit, i.unit_volume, i.sale_price, c.name AS category, SUM(sl.qty) AS qty,
+          SUM(sl.total * CASE WHEN d.subtotal>0 THEN d.total/d.subtotal ELSE 1 END) AS revenue, SUM(sl.qty*COALESCE(sl.unit_cost,0)) AS cost, COUNT(DISTINCT d.id) AS docs
+        FROM sales_lines sl JOIN sales_docs d ON d.id=sl.doc_id JOIN items i ON i.id=sl.item_id LEFT JOIN categories c ON c.id=i.category_id
+        WHERE ${w} GROUP BY i.id, c.name ORDER BY revenue DESC`, p),
+      produced: await q(`SELECT po.product_id AS id, i.name, i.unit, i.unit_volume, SUM(po.produced_qty) AS qty FROM production_orders po JOIN items i ON i.id=po.product_id
+        WHERE po.company_id=$1 AND po.status='termine' AND po.planned_date BETWEEN $2 AND $3 GROUP BY po.product_id, i.name, i.unit, i.unit_volume`, p),
+      stock: await q(`SELECT i.id, i.name, i.unit, i.unit_volume, COALESCE(SUM(l.qty) FILTER (WHERE l.status='ok'),0) AS qty FROM items i LEFT JOIN lots l ON l.item_id=i.id AND l.qty>0
+        WHERE i.company_id=$1 AND i.type='pf' AND i.active GROUP BY i.id`, [cid]),
+      weekday: await q(`SELECT EXTRACT(ISODOW FROM d.date)::int AS dow, SUM(d.total) AS total, COUNT(*) AS count, COUNT(DISTINCT d.date) AS days FROM sales_docs d WHERE ${w} GROUP BY 1 ORDER BY 1`, p),
+    };
+  }],
+
   stock: [['rapports', 'stock'], async (cid) => ({
     items: await q(`SELECT i.id,i.code,i.name,i.type,i.unit,i.min_stock,i.cost_price,i.sale_price,c.name AS category,
       COALESCE(SUM(l.qty) FILTER (WHERE l.status='ok'),0) AS stock,

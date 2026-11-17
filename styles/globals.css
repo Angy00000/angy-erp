@@ -920,3 +920,11 @@ table.t { width: 100%; border-collapse: collapse; }
 .btn.disabled { opacity: .5; pointer-events: none; }
 .warn-box { background: var(--amber-soft); border: 1px solid #f0b54a; color: var(--ink); border-radius: 12px; padding: 10px 14px; margin-bottom: 12px; font-size: 13px; }
 .warn-box ul { margin: 6px 0 0; padding-left: 18px; } .warn-box li { margin: 2px 0; }
+
+/* ---------- Rapport par produit & format ---------- */
+.share { position: relative; height: 22px; background: var(--surface-2); border-radius: 6px; overflow: hidden; }
+.share > div { position: absolute; inset: 0 auto 0 0; background: var(--accent-soft); border-right: 2px solid var(--accent); }
+.share span { position: relative; font-size: 11.5px; font-weight: 700; padding: 0 8px; line-height: 22px; white-space: nowrap; }
+.share.sm { height: 18px; } .share.sm span { line-height: 18px; font-weight: 600; color: var(--ink-3); }
+tr.clickable { cursor: pointer; } tr.clickable:hover td { background: var(--surface-2); }
+tr.best-row td { background: var(--green-soft, rgba(30,140,80,.08)); }

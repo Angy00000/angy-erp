@@ -1,13 +1,13 @@
-import { useState } from 'react';
+import { useState, Fragment } from 'react';
 import { report, money, num, date, monthStart, today, exportCSV, LABELS } from '../../lib/client';
 import { Tabs, useData, Stat, HBars, Bars } from '../ui';
 
 export default function Rapports({ can }) {
-  const all = [['pnl', 'Compte de résultat', 'rapports'], ['sales', 'Ventes', 'ventes'], ['stock', 'Valorisation du stock', 'stock'], ['prod', 'Production & coûts', 'production'], ['cash', 'Trésorerie', 'caisse'], ['bal', 'Créances & dettes', 'ventes'], ['qual', 'Qualité', 'qualite']];
+  const all = [['pnl', 'Compte de résultat', 'rapports'], ['sales', 'Ventes', 'ventes'], ['byprod', 'Par produit & format', 'ventes'], ['stock', 'Valorisation du stock', 'stock'], ['prod', 'Production & coûts', 'production'], ['cash', 'Trésorerie', 'caisse'], ['bal', 'Créances & dettes', 'ventes'], ['qual', 'Qualité', 'qualite']];
   const tabs = all.filter((t) => can('rapports') || can(t[2])).map(([k, l]) => [k, l]);
   const [tab, setTab] = useState(tabs[0]?.[0]);
   const [range, setRange] = useState({ from: monthStart(), to: today() });
-  const ranged = ['pnl', 'sales', 'prod', 'cash', 'qual'].includes(tab);
+  const ranged = ['pnl', 'sales', 'byprod', 'prod', 'cash', 'qual'].includes(tab);
   return (
     <div>
       <Tabs value={tab} onChange={setTab} tabs={tabs} />
@@ -23,6 +23,7 @@ export default function Rapports({ can }) {
       </div>
       {tab === 'pnl' && <PnL range={range} />}
       {tab === 'sales' && <Sales range={range} />}
+      {tab === 'byprod' && <ByProduct range={range} />}
       {tab === 'stock' && <StockVal />}
       {tab === 'prod' && <Prod range={range} />}
       {tab === 'cash' && <Cash range={range} />}
@@ -177,6 +178,137 @@ function Qual({ range }) {
       <div className="grid g2">
         <Table title="Contrôles par type" rows={d.controls} cols={[['type', 'Type', null, (r) => LABELS.qc_type[r.type] || r.type], ['total', 'Total', 'qty'], ['ok', 'Conformes', 'qty'], ['nok', 'Non conformes', 'qty'], ['rate', 'Taux', null, (r) => `${((r.ok / (r.total || 1)) * 100).toFixed(0)} %`]]} />
         <Table title="NC en retard" rows={d.overdue} cols={[['number', 'N°'], ['description', 'Description'], ['responsible', 'Responsable'], ['due_date', 'Échéance', 'date']]} />
+      </div>
+    </div>
+  );
+}
+
+// ---------- Par produit & format : quel jus rapporte le plus, quel format, quel jour ----------
+const famOf = (name) => { const r = /^(.*?)\s*\(([^)]*)\)\s*$/.exec(String(name || '').trim()); return r ? { fam: r[1].trim(), fmt: r[2].trim() } : { fam: String(name || '').trim(), fmt: '' }; };
+const cap = (x) => (x ? x.charAt(0).toUpperCase() + x.slice(1) : x);
+const DOW = ['', 'Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi', 'Dimanche'];
+const pct = (a, b) => (b ? `${Math.round((a / b) * 100)} %` : '—');
+
+function ByProduct({ range }) {
+  const { data: d } = useData(() => report('by_product', range), [range.from, range.to]);
+  const [open, setOpen] = useState({});
+  if (!d) return <Loading />;
+  const items = d.items.map((r) => {
+    const f = famOf(r.name); const uv = Number(r.unit_volume) || 0; const qty = Number(r.qty) || 0;
+    const revenue = Number(r.revenue) || 0; const cost = Number(r.cost) || 0;
+    return { ...r, fam: f.fam, fmt: cap(f.fmt) || r.unit, uv, qty, revenue, cost, margin: revenue - cost, liters: qty * uv };
+  });
+  const tot = items.reduce((m, r) => ({ revenue: m.revenue + r.revenue, margin: m.margin + r.margin, liters: m.liters + r.liters }), { revenue: 0, margin: 0, liters: 0 });
+  const group = (key) => {
+    const m = new Map();
+    for (const r of items) { const k = r[key]; const g = m.get(k) || { name: k, revenue: 0, margin: 0, liters: 0, qty: 0, rows: [] }; g.revenue += r.revenue; g.margin += r.margin; g.liters += r.liters; g.qty += r.qty; g.rows.push(r); m.set(k, g); }
+    return [...m.values()].sort((a, b) => b.revenue - a.revenue);
+  };
+  const fams = group('fam');
+  const fmts = group('fmt').map((g) => ({ ...g, unit: g.rows[0]?.unit, perL: g.liters > 0 ? g.margin / g.liters : null, perU: g.qty ? g.margin / g.qty : 0 }));
+  const bestPerL = fmts.filter((x) => x.perL !== null).sort((a, b) => b.perL - a.perL)[0];
+  // Produit sur la période / vendu / en stock, en litres quand c'est un jus
+  const vol = (rows) => rows.reduce((s2, r) => s2 + (Number(r.qty) || 0) * (Number(r.unit_volume) || 0), 0);
+  const units = (rows) => rows.reduce((s2, r) => s2 + (Number(r.qty) || 0), 0);
+  const famNames = [...new Set([...fams.map((f) => f.name), ...d.produced.map((r) => famOf(r.name).fam)])];
+  const flow = famNames.map((name) => {
+    const pr = d.produced.filter((r) => famOf(r.name).fam === name); const st = d.stock.filter((r) => famOf(r.name).fam === name);
+    const so = items.filter((r) => r.fam === name);
+    const liq = [...pr, ...st, ...so].some((r) => Number(r.unit_volume) > 0);
+    return { name, liq, produced: liq ? vol(pr) : units(pr), sold: liq ? so.reduce((s2, r) => s2 + r.liters, 0) : units(so), stock: liq ? vol(st) : units(st) };
+  }).sort((a, b) => b.sold - a.sold);
+  const days = d.weekday.map((x) => ({ name: DOW[x.dow], total: Number(x.days) ? Number(x.total) / Number(x.days) : 0, n: x.days }));
+  const bestDay = [...days].sort((a, b) => b.total - a.total)[0];
+
+  if (!items.length) return <div className="card empty">Aucune vente sur cette période.</div>;
+  return (
+    <div>
+      <div className="grid g4">
+        <Stat accent k="Chiffre d'affaires" v={money(tot.revenue)} s={tot.liters ? `${num(Math.round(tot.liters * 10) / 10)} L vendus` : `${items.length} produit(s)`} />
+        <Stat k="Bénéfice (marge brute)" v={money(tot.margin)} s={`${pct(tot.margin, tot.revenue)} du chiffre d'affaires`} />
+        <Stat k="Produit qui rapporte le plus" v={[...fams].sort((a, b) => b.margin - a.margin)[0]?.name || '—'} s={`bénéfice ${money([...fams].sort((a, b) => b.margin - a.margin)[0]?.margin || 0)}`} />
+        <Stat k={bestPerL ? 'Format le plus rentable (par litre)' : 'Meilleur jour'} v={bestPerL ? bestPerL.name : bestDay?.name || '—'} s={bestPerL ? `${money(bestPerL.perL)} de bénéfice par litre` : bestDay ? `${money(bestDay.total)} en moyenne` : ''} />
+      </div>
+      <div className="space" />
+
+      <div className="card">
+        <div className="card-pad row" style={{ justifyContent: 'space-between', paddingBottom: 6 }}><h3 style={{ margin: 0 }}>Par produit</h3>
+          <button className="btn sm no-print" onClick={() => exportCSV('ventes-par-produit-format', [{ k: 'fam', l: 'Produit' }, { k: 'fmt', l: 'Format' }, { k: 'qty', l: 'Quantité' }, { k: 'liters', l: 'Litres' }, { k: 'revenue', l: 'CA' }, { k: 'margin', l: 'Bénéfice' }], items)}>CSV</button></div>
+        <div className="table-wrap"><table className="t">
+          <thead><tr><th>Produit</th><th className="r">Vendu</th><th className="r">Chiffre d'affaires</th><th className="r">Bénéfice</th><th className="r">Marge</th><th style={{ width: '22%' }}>Part des ventes</th></tr></thead>
+          <tbody>{fams.map((g) => (
+            <Fragment key={g.name}>
+              <tr className="clickable" onClick={() => setOpen({ ...open, [g.name]: !open[g.name] })}>
+                <td className="nm"><b>{open[g.name] ? '▾' : '▸'} {g.name}</b><div className="muted small">{g.rows.length} format(s)</div></td>
+                <td className="r nw">{g.liters > 0 ? `${num(Math.round(g.liters * 10) / 10)} L` : num(g.qty)}</td>
+                <td className="r nw strong">{money(g.revenue)}</td>
+                <td className={'r nw strong ' + (g.margin >= 0 ? 'pos' : 'neg')}>{money(g.margin)}</td>
+                <td className="r nw">{pct(g.margin, g.revenue)}</td>
+                <td><div className="share"><div style={{ width: `${tot.revenue ? (g.revenue / tot.revenue) * 100 : 0}%` }} /><span>{pct(g.revenue, tot.revenue)}</span></div></td>
+              </tr>
+              {open[g.name] && g.rows.sort((a, b) => a.uv - b.uv).map((r) => (
+                <tr key={r.id} className="sub-row">
+                  <td className="nm" style={{ paddingLeft: 30 }}>{r.fmt}</td>
+                  <td className="r nw">{num(r.qty)} {r.unit}{r.liters > 0 && <div className="muted small">{num(Math.round(r.liters * 10) / 10)} L</div>}</td>
+                  <td className="r nw">{money(r.revenue)}<div className="muted small">{money(r.qty ? r.revenue / r.qty : 0)} / {r.unit}</div></td>
+                  <td className={'r nw ' + (r.margin >= 0 ? 'pos' : 'neg')}>{money(r.margin)}<div className="muted small">{money(r.qty ? r.margin / r.qty : 0)} / {r.unit}</div></td>
+                  <td className="r nw">{pct(r.margin, r.revenue)}</td>
+                  <td><div className="share sm"><div style={{ width: `${g.revenue ? (r.revenue / g.revenue) * 100 : 0}%` }} /><span>{pct(r.revenue, g.revenue)} du {g.name.toLowerCase()}</span></div></td>
+                </tr>
+              ))}
+            </Fragment>
+          ))}</tbody>
+          <tfoot><tr><td>Total</td><td className="r">{tot.liters ? `${num(Math.round(tot.liters * 10) / 10)} L` : ''}</td><td className="r">{money(tot.revenue)}</td><td className="r">{money(tot.margin)}</td><td className="r">{pct(tot.margin, tot.revenue)}</td><td /></tr></tfoot>
+        </table></div>
+        <div className="muted small card-pad" style={{ paddingTop: 4 }}>Cliquez sur un produit pour voir ses formats.</div>
+      </div>
+      <div className="space" />
+
+      <div>
+        <div className="card">
+          <div className="card-pad" style={{ paddingBottom: 6 }}><h3 style={{ margin: 0 }}>Par format</h3>
+            {bestPerL && <p className="muted small" style={{ margin: '4px 0 0' }}>Pour un même litre de jus, c'est en <b>{bestPerL.name.toLowerCase()}</b> qu'il rapporte le plus.</p>}</div>
+          <div className="table-wrap"><table className="t">
+            <thead><tr><th>Format</th><th className="r">Vendu</th><th className="r">CA</th><th className="r">Bénéfice</th>{bestPerL && <th className="r">Bénéfice / litre</th>}</tr></thead>
+            <tbody>{fmts.map((g) => (
+              <tr key={g.name} className={bestPerL && g.name === bestPerL.name ? 'best-row' : ''}>
+                <td className="nm"><b>{g.name}</b></td>
+                <td className="r nw">{num(g.qty)} {g.unit}{g.liters > 0 && <div className="muted small">{num(Math.round(g.liters * 10) / 10)} L</div>}</td>
+                <td className="r nw">{money(g.revenue)}</td>
+                <td className={'r nw ' + (g.margin >= 0 ? 'pos' : 'neg')}>{money(g.margin)}</td>
+                {bestPerL && <td className="r nw strong">{g.perL !== null ? money(g.perL) : '—'}</td>}
+              </tr>
+            ))}</tbody>
+          </table></div>
+        </div>
+        <div className="space" />
+        <div className="card card-pad">
+          <h3>Jours de la semaine</h3>
+          <p className="muted small" style={{ marginTop: -6 }}>Ventes moyennes par jour {bestDay ? <>— le meilleur jour est le <b>{bestDay.name.toLowerCase()}</b></> : ''}.</p>
+          <HBars data={days} />
+        </div>
+      </div>
+      <div className="space" />
+
+      <div className="card">
+        <div className="card-pad" style={{ paddingBottom: 6 }}><h3 style={{ margin: 0 }}>Produit, vendu et en stock</h3>
+          <p className="muted small" style={{ margin: '4px 0 0' }}>Ce qui a été produit sur la période, ce qui a été vendu, et ce qui reste aujourd'hui.</p></div>
+        <div className="table-wrap"><table className="t">
+          <thead><tr><th>Produit</th><th className="r">Produit</th><th className="r">Vendu</th><th className="r">En stock aujourd'hui</th><th>Écoulement</th></tr></thead>
+          <tbody>{flow.map((f) => {
+            const u = f.liq ? ' L' : '';
+            const rate = f.produced ? Math.min(100, (f.sold / f.produced) * 100) : null;
+            return (
+              <tr key={f.name}>
+                <td className="nm"><b>{f.name}</b></td>
+                <td className="r nw">{num(Math.round(f.produced * 10) / 10)}{u}</td>
+                <td className="r nw">{num(Math.round(f.sold * 10) / 10)}{u}</td>
+                <td className={'r nw ' + (f.stock <= 0 ? 'neg strong' : '')}>{f.stock <= 0 ? 'Épuisé' : `${num(Math.round(f.stock * 10) / 10)}${u}`}</td>
+                <td>{rate !== null ? <div className="share"><div style={{ width: `${rate}%` }} /><span>{Math.round(rate)} % vendu</span></div> : <span className="muted small">pas produit sur la période</span>}</td>
+              </tr>
+            );
+          })}</tbody>
+        </table></div>
       </div>
     </div>
   );
