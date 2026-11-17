@@ -541,6 +541,14 @@ export function QuickProd({ onClose, initial, note, edit }) {
       const took = pack.reduce((s2, x) => s2 + usedQty(x.id), 0);
       if (took + 0.5 < q) out.push(`Vous avez produit ${num(q)} ${u}s de jus, mais seulement ${num(took)} ${u}${took > 1 ? 's' : ''} vide${took > 1 ? 's' : ''} ${took > 1 ? 'sont sortis' : 'est sorti'} du stock (${pack.map((x) => String(x.name).trim()).join(' / ')}).`);
     }
+    // 1 bis. Étiquettes : une par bouteille quand la recette du format en prévoit
+    const labels = stockItems.filter((x) => x.type === 'emballage' && (/[ée]tiquet/i.test(x.name) || norm(x.unit) === 'feuille'));
+    if (labels.length) {
+      const ids = labels.map((x) => x.id);
+      const expected = valid.filter((c) => (recipeOf(c.p.id)?.lines || []).some((l) => ids.includes(Number(l.item_id)))).reduce((s2, c) => s2 + c.qty, 0);
+      const took = labels.reduce((s2, x) => s2 + usedQty(x.id), 0);
+      if (expected > 0 && took + 0.5 < expected) out.push(`${num(expected)} bouteille${expected > 1 ? 's' : ''} à étiqueter, mais seulement ${num(took)} étiquette${took > 1 ? 's' : ''} sortie${took > 1 ? 's' : ''} du stock.`);
+    }
     // 2. Recettes : un ingrédient prévu absent ou très en dessous
     if (withRecipe.length) {
       const exp = new Map(fromRecipes().rows.map((x) => [Number(x.item_id), Number(x.qty)]));
