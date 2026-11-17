@@ -537,6 +537,19 @@ const OPS = {
     await t.q("UPDATE sales_docs SET status='transforme' WHERE id=$1", [doc.id]);
     return nd;
   }],
+  // Changer la date d'un encaissement (et la ligne de trésorerie qui va avec)
+  payment_date: [['ventes', 'caisse'], async (t, user, b) => {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(b.date || ''))) fail('Date invalide');
+    if (b.date > today()) fail('La date ne peut pas être dans le futur');
+    const p = await t.one('SELECT * FROM payments WHERE id=$1 AND company_id=$2 FOR UPDATE', [b.id, user.cid]);
+    if (!p) fail('Encaissement introuvable');
+    const sign = p.direction === 'in' ? 1 : -1;
+    const tx = await t.one(`SELECT id FROM cash_transactions WHERE company_id=$1 AND account_id=$2 AND ref_type=$3 AND ref_id=$4 AND amount=$5 AND date=$6 ORDER BY id LIMIT 1`,
+      [user.cid, p.account_id, p.doc_type, p.doc_id, sign * n(p.amount), p.date]);
+    await t.q('UPDATE payments SET date=$1, reference=$2 WHERE id=$3', [b.date, b.reference === undefined ? p.reference : (b.reference || null), p.id]);
+    if (tx) await t.q('UPDATE cash_transactions SET date=$1 WHERE id=$2', [b.date, tx.id]);
+    return { ok: true, old_date: p.date, amount: n(p.amount) };
+  }],
   // Paiement d'un client qui doit de l'argent : réparti sur ses factures, les plus anciennes d'abord
   customer_pay: [['ventes'], async (t, user, b) => {
     let amount = r2(b.amount);
@@ -631,15 +644,15 @@ const OPS = {
     const subtotal = r2(lines.reduce((s, l) => s + n(l.qty) * n(l.unit_price) - n(l.discount), 0));
     const total = r2(subtotal - n(b.discount));
     const doc = await t.one(`INSERT INTO sales_docs (company_id,number,type,customer_id,date,status,subtotal,discount,total,channel,user_id)
-      VALUES ($1,$2,'facture',$3,current_date,'brouillon',$4,$5,$6,$7,$8) RETURNING *`,
-      [user.cid, number, customer, subtotal, n(b.discount), total, b.channel || 'comptoir', user.uid]);
+      VALUES ($1,$2,'facture',$3,$4,'brouillon',$5,$6,$7,$8,$9) RETURNING *`,
+      [user.cid, number, customer, b.date || today(), subtotal, n(b.discount), total, b.channel || 'comptoir', user.uid]);
     for (const l of lines) {
       await t.q('INSERT INTO sales_lines (doc_id,item_id,qty,unit_price,discount,total,lot_id) VALUES ($1,$2,$3,$4,$5,$6,$7)',
         [doc.id, l.item_id, n(l.qty), n(l.unit_price), n(l.discount), r2(n(l.qty) * n(l.unit_price) - n(l.discount)), l.lot_id ? Number(l.lot_id) : null]);
     }
     const v = await validateSale(t, user, doc);
     const paid = Math.min(r2(b.paid ?? total), total);
-    if (paid > 0) await payDoc(t, user, { ...doc, status: v.status, paid: 0 }, { amount: paid, account_id: b.account_id, method: b.method });
+    if (paid > 0) await payDoc(t, user, { ...doc, status: v.status, paid: 0 }, { amount: paid, account_id: b.account_id, method: b.method, date: b.date });
     return { id: doc.id, number, total };
   }],
 

@@ -56,6 +56,7 @@ function POS() {
   const [paid, setPaid] = useState('');
   const [discount, setDiscount] = useState('');
   const [channel, setChannel] = useState('comptoir');
+  const [day, setDay] = useState(today());
   const [busy, setBusy] = useState(false);
   const [last, setLast] = useState(null);
 
@@ -73,7 +74,7 @@ function POS() {
     if (!cart.length) return toast('Panier vide', 'error');
     setBusy(true);
     try {
-      const r = await op('pos_sale', { lines: cart, customer_id: customer || null, account_id: acc, paid: paid === '' ? total : Number(paid), discount: Number(discount || 0), channel });
+      const r = await op('pos_sale', { lines: cart, customer_id: customer || null, account_id: acc, paid: paid === '' ? total : Number(paid), discount: Number(discount || 0), channel, date: day || today() });
       toast(`Vente ${r.number} enregistrée`);
       setLast(r);
       setCart([]); setPaid(''); setDiscount('');
@@ -144,7 +145,9 @@ function POS() {
             <select className="input" value={channel} onChange={(e) => setChannel(e.target.value)}>{opts('channel').map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select></div>
           <div className="field"><label>Remise</label><input className="input" type="number" value={discount} onChange={(e) => setDiscount(e.target.value)} placeholder="0" /></div>
           <div className="field"><label>Montant reçu</label><input className="input" type="number" value={paid} onChange={(e) => setPaid(e.target.value)} placeholder={String(Math.max(total, 0))} /></div>
+          <div className="field full"><label>Date d'encaissement</label><input className="input" type="date" value={day} max={today()} onChange={(e) => setDay(e.target.value)} /></div>
         </div>
+        {day && day !== today() && <div className="note" style={{ marginTop: 8 }}>Vente enregistrée à la date du <b>{date(day)}</b> (pas aujourd'hui).</div>}
         <div className="space" />
         <div className="row" style={{ justifyContent: 'space-between' }}><span className="muted strong">TOTAL</span><span className="total-big">{money(total)}</span></div>
         {paid !== '' && Number(paid) < total && <div className="note" style={{ marginTop: 8 }}>Reste dû par le client : {money(total - Number(paid))} (créance)</div>}
@@ -235,11 +238,23 @@ function Clients() {
 }
 
 function Payments() {
+  const [edit, setEdit] = useState(null);
   return (
-    <CrudTable entity="payments" title="Encaissement" params={{ direction: 'in' }} dateRange csvName="encaissements"
-      columns={[{ k: 'date', l: 'Date', t: 'date' }, { k: 'amount', l: 'Montant', t: 'money' }, { k: 'account_name', l: 'Compte' }, { k: 'method', l: 'Mode' }, { k: 'reference', l: 'Référence' },
-        { k: 'doc_id', l: 'Document', fmt: (r) => r.doc_id ? <a href={`/print/sales_docs/${r.doc_id}`} target="_blank" rel="noreferrer">Voir</a> : '' }]}
-      sums={['amount']} canCreate={false}
-    />
+    <>
+      <CrudTable entity="payments" title="Encaissement" params={{ direction: 'in' }} dateRange csvName="encaissements"
+        columns={[{ k: 'date', l: "Date d'encaissement", t: 'date' }, { k: 'amount', l: 'Montant', t: 'money' }, { k: 'account_name', l: 'Compte' }, { k: 'method', l: 'Mode' }, { k: 'reference', l: 'Référence' },
+          { k: 'doc_id', l: 'Document', fmt: (r) => r.doc_id ? <a href={`/print/sales_docs/${r.doc_id}`} target="_blank" rel="noreferrer">{r.doc_number || 'Voir'}</a> : '' }]}
+        sums={['amount']} canCreate={false}
+        rowActions={(r, reload) => <button className="btn sm" onClick={() => setEdit({ row: r, reload })}>📅 Changer la date</button>}
+      />
+      {edit && (
+        <ActionModal title="Changer la date d'encaissement" initial={{ date: String(edit.row.date).slice(0, 10), reference: edit.row.reference || '' }}
+          fields={[{ k: 'date', l: "Date d'encaissement", t: 'date', req: true }, { k: 'reference', l: 'Référence (n° transaction…)', t: 'text' }]}
+          onSubmit={(d) => op('payment_date', { ...d, id: edit.row.id })}
+          onClose={(ok) => { const rl = edit.reload; setEdit(null); if (ok) { invalidateRefs('accounts'); rl(); } }}>
+          <div className="note" style={{ marginBottom: 12 }}>Encaissement de <b>{money(edit.row.amount)}</b> sur {edit.row.account_name || 'le compte'}. La date change aussi dans la trésorerie.</div>
+        </ActionModal>
+      )}
+    </>
   );
 }
