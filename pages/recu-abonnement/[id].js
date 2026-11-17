@@ -4,7 +4,7 @@ import { useRouter } from 'next/router';
 import { money, date } from '../../lib/client';
 import { waLink } from '../../components/Chrome';
 
-// Reçu d'abonnement ERP (console Angy Company), numéroté ANGY-AAAA-0001.
+// Reçu d'abonnement ERP (console Angy Company), numéroté ERP-AAAA-0001 (les reçus émis avant gardent « ANGY-AAAA-0001 »).
 const MODES = { wave: 'Wave', orange_money: 'Orange Money', especes: 'Espèces', virement: 'Virement', autre: 'Autre' };
 const S = {
   page: { maxWidth: 760, margin: '0 auto', padding: '36px 40px', background: '#fff', minHeight: '100vh', fontSize: 13, color: '#17221d' },

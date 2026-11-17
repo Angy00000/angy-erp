@@ -26,5 +26,5 @@ npm run dev
 - `components/modules/*` — écrans de chaque module
 
 ## Déploiement
-Chaque push sur `main` est déployé automatiquement sur Vercel (projet `angy-erp`, https://angy-erp.vercel.app).
+Chaque push sur `main` est déployé automatiquement sur Vercel (projet `erp`, https://erp-sn.vercel.app).
 Variables d'environnement requises sur Vercel : `DATABASE_URL`, `JWT_SECRET`.

@@ -124,8 +124,9 @@ export default async function consoleApi(req, res) {
         const pid = await tx(async (t) => {
           await t.q('LOCK TABLE subscription_payments IN SHARE ROW EXCLUSIVE MODE');
           const year = String(b.date || new Date().toISOString()).slice(0, 4);
-          const last = await t.one("SELECT COALESCE(MAX(substring(number from 11)::int),0) AS c FROM subscription_payments WHERE number LIKE $1", [`ANGY-${year}-%`]);
-          const number = `ANGY-${year}-${String(Number(last.c) + 1).padStart(4, '0')}`;
+          // La numérotation continue après les anciens reçus « ANGY-AAAA-0001 » : les nouveaux sont « ERP-AAAA-0001 ».
+          const last = await t.one("SELECT COALESCE(MAX(substring(number from '[0-9]+$')::int),0) AS c FROM subscription_payments WHERE number LIKE $1 OR number LIKE $2", [`ERP-${year}-%`, `ANGY-${year}-%`]);
+          const number = `ERP-${year}-${String(Number(last.c) + 1).padStart(4, '0')}`;
           const r = await t.one('INSERT INTO subscription_payments (company_id,amount,date,method,period_label,new_end,note,number,admin_name) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id',
             [id, amount, b.date || new Date().toISOString().slice(0, 10), b.method || null, b.period_label || null, newEnd, b.note || null, number, admin.name]);
           if (newEnd) await t.q("UPDATE companies SET sub_end=$1, status='actif' WHERE id=$2", [newEnd, id]);

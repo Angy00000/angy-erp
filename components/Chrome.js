@@ -169,8 +169,9 @@ export function InstallApp() {
 export function UpdateBanner() {
   const [ready, setReady] = useState(false);
   useEffect(() => {
-    // Adresse d'une ancienne version figée (angy-xxxx-angycompany.vercel.app) : on renvoie vers l'adresse officielle
-    if (/^angy-(?!erp\.)[a-z0-9]+-angycompany\.vercel\.app$/.test(location.hostname)) { location.replace('https://angy-erp.vercel.app' + location.pathname + location.search); return undefined; }
+    // Ancienne adresse (angy-erp.vercel.app) ou version figée (angy-xxxx / erp-xxxx-angycompany.vercel.app) : on renvoie vers l'adresse officielle
+    const h = location.hostname;
+    if (h === 'angy-erp.vercel.app' || /^(angy|erp)-[a-z0-9]+-angycompany\.vercel\.app$/.test(h)) { location.replace('https://erp-sn.vercel.app' + location.pathname + location.search); return undefined; }
     const mine = window.__NEXT_DATA__?.buildId;
     if (!mine || mine === 'development') return undefined;
     const check = async () => {
