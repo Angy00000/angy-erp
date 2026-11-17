@@ -195,10 +195,10 @@ function Moves() {
 
 
 // Nouvel achat (marché, boutique, grossiste, fournisseur) : plusieurs articles en une fois, entrés en stock et payés depuis un compte.
-export function MarketPurchase({ onClose, edit }) {
+export function MarketPurchase({ onClose, edit, prefill }) {
   const items = useRefOptions('items', { active: true }).filter((i) => ['mp', 'emballage', 'consommable', 'materiel', 'semi_fini'].includes(i.type) || (edit && edit.lines.some((l) => l.item_id === i.id)));
   const accounts = useRefOptions('accounts', { active: true });
-  const [rows, setRows] = useState(() => (edit ? edit.lines.map((l) => ({ id: l.id, item_id: l.item_id, qty: String(Number(l.qty)), unit_cost: String(Number(l.unit_cost)), used: Number(l.used) || 0 })) : [{}, {}, {}]));
+  const [rows, setRows] = useState(() => (edit ? edit.lines.map((l) => ({ id: l.id, item_id: l.item_id, qty: String(Number(l.qty)), unit_cost: String(Number(l.unit_cost)), used: Number(l.used) || 0 })) : prefill && prefill.length ? prefill : [{}, {}, {}]));
   const [d, setD] = useState(() => (edit ? { id: edit.id, date: edit.date, account_id: edit.account_id || '', supplier_id: edit.supplier_id || '', note: edit.note || '' } : { date: today() }));
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);

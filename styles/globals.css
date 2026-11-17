@@ -911,3 +911,10 @@ table.t { width: 100%; border-collapse: collapse; }
 .pq-l input { padding-right: 28px; }
 .pq-eq { color: var(--ink-3); font-weight: 800; }
 .pq-fmts { grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); }
+
+/* ---------- Liste d'achats ---------- */
+.buy-in { position: relative; display: inline-block; width: 140px; }
+.buy-in input { padding-right: 58px; text-align: right; font-weight: 700; }
+.buy-in span { position: absolute; right: 9px; top: 50%; transform: translateY(-50%); font-size: 11.5px; color: var(--ink-3); pointer-events: none; max-width: 52px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.plan-in { display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; font-weight: 700; color: var(--ink-2); }
+.btn.disabled { opacity: .5; pointer-events: none; }

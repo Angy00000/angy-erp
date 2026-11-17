@@ -44,6 +44,31 @@ export async function openOrders(cid) {
 }
 
 // Fonctions transverses de l'application : recherche globale, notifications, annonces, aide
+// Liste d'achats : pour chaque matière / emballage, ce qui est utilisé par jour (moyenne récente),
+// combien de jours il reste et combien acheter pour tenir « days » jours (+ stock minimum).
+export async function buyList(cid, days = 14) {
+  const rows = await q(`SELECT i.id, i.name, i.type, i.unit, i.min_stock, i.cost_price,
+      COALESCE((SELECT SUM(qty) FROM lots l WHERE l.item_id=i.id AND l.status='ok'),0) AS stock,
+      COALESCE((SELECT -SUM(m.qty) FROM stock_movements m WHERE m.item_id=i.id AND m.qty<0 AND m.type NOT IN ('transfert','annulation','inventaire') AND m.created_at > now() - interval '30 days'),0) AS used,
+      (SELECT MIN(m.created_at) FROM stock_movements m WHERE m.item_id=i.id) AS first_move,
+      (SELECT l.unit_cost FROM lots l WHERE l.item_id=i.id AND l.source_type IN ('purchases','achat_marche','reception') ORDER BY l.id DESC LIMIT 1) AS last_cost,
+      (SELECT s.name FROM lots l JOIN suppliers s ON s.id=l.supplier_id WHERE l.item_id=i.id ORDER BY l.id DESC LIMIT 1) AS last_supplier
+    FROM items i WHERE i.company_id=$1 AND i.active AND i.type IN ('mp','emballage','consommable')`, [cid]);
+  const now = Date.now();
+  return rows.map((r) => {
+    const span = r.first_move ? Math.min(30, Math.max(3, (now - new Date(r.first_move).getTime()) / 86400000)) : 30;
+    const perDay = n(r.used) / span;
+    const stock = n(r.stock);
+    const daysLeft = perDay > 0 ? stock / perDay : null;
+    const target = perDay * days + n(r.min_stock);
+    let toBuy = Math.max(0, target - stock);
+    toBuy = toBuy >= 10 ? Math.ceil(toBuy) : Math.ceil(toBuy * 10) / 10;
+    const price = n(r.last_cost) || n(r.cost_price);
+    return { id: r.id, name: String(r.name).trim(), type: r.type, unit: r.unit, stock, min_stock: n(r.min_stock), per_day: Math.round(perDay * 1000) / 1000,
+      days_left: daysLeft === null ? null : Math.floor(daysLeft), to_buy: toBuy, price, total: Math.round(toBuy * price), supplier: r.last_supplier, used30: n(r.used) };
+  }).sort((a, b) => (b.to_buy > 0) - (a.to_buy > 0) || (a.days_left ?? 1e9) - (b.days_left ?? 1e9) || a.name.localeCompare(b.name, 'fr'));
+}
+
 export default handler(async (req, res, user) => {
   const { action } = req.query;
   const cid = user.cid;
@@ -196,6 +221,11 @@ export default handler(async (req, res, user) => {
         out.push({ level: 'orange', mod: 'ventes', title: 'À produire pour les commandes', text: `${nd.name} : ${n(nd.missing)} ${nd.unit || ''}${nd.missing_l ? ` (${nd.missing_l} L)` : ''}` });
       }
     }
+    if (c('stock') || c('production') || c('achats')) {
+      const soon = (await buyList(cid, 14)).filter((x) => x.days_left !== null && x.days_left <= 5);
+      if (soon.length) out.push({ level: soon.some((x) => x.days_left <= 1) ? 'red' : 'orange', mod: 'achats', title: `${soon.length} article(s) à racheter bientôt`,
+        text: soon.slice(0, 4).map((x) => `${x.name} (${x.days_left <= 0 ? 'épuisé' : `${x.days_left} j`})`).join(', ') + ' — Achats → À acheter' });
+    }
     if (c('stock') || c('production')) {
       for (const r of await q(`SELECT * FROM (SELECT i.name,i.unit,i.min_stock, COALESCE((SELECT SUM(qty) FROM lots l WHERE l.item_id=i.id AND l.status='ok'),0) AS stock
         FROM items i WHERE i.company_id=$1 AND i.active AND i.min_stock>0) x WHERE stock<min_stock ORDER BY stock LIMIT 10`, [cid]))
@@ -225,6 +255,12 @@ export default handler(async (req, res, user) => {
       if (co.d !== null && co.d <= 7) out.push({ level: co.d < 3 ? 'red' : 'orange', mod: 'aide', title: co.status === 'essai' ? 'Fin de la période d\'essai' : 'Abonnement', text: co.d < 0 ? 'Expiré' : `Se termine dans ${co.d} jour(s)` });
     }
     return out;
+  }
+
+  if (action === 'buy_list') {
+    if (!c('stock') && !c('achats') && !c('production')) fail('Accès refusé', 403);
+    const days = Math.min(Math.max(Number(req.query.days) || 14, 1), 120);
+    return { days, list: await buyList(cid, days) };
   }
 
   // Une production (tous ses formats) prête à être modifiée

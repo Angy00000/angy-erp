@@ -4,13 +4,15 @@ import { Tabs, run, confirmDo, invalidateRefs, RefSelect } from '../ui';
 import CrudTable from '../CrudTable';
 import { MarketPurchase, PurchaseHistory } from './Stock';
 import ActionModal from '../ActionModal';
+import BuyList from './AchatsList';
 
-export default function Achats() {
+export default function Achats({ company }) {
   const [tab, setTab] = useState('achats');
   return (
     <div>
-      <Tabs value={tab} onChange={setTab} tabs={[['achats', '🛒 Achats payés'], ['po', 'Bons de commande'], ['suppliers', 'Fournisseurs'], ['pay', 'Paiements fournisseurs']]} />
+      <Tabs value={tab} onChange={setTab} tabs={[['achats', '🛒 Achats payés'], ['liste', '📝 À acheter'], ['po', 'Bons de commande'], ['suppliers', 'Fournisseurs'], ['pay', 'Paiements fournisseurs']]} />
       {tab === 'achats' && <PurchaseHistory />}
+      {tab === 'liste' && <BuyList company={company} />}
       {tab === 'po' && <Orders />}
       {tab === 'suppliers' && <Suppliers />}
       {tab === 'pay' && <SupplierPayments />}
