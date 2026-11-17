@@ -1,6 +1,6 @@
 {
-  "name": "ANGY ERP — Gestion de production",
-  "short_name": "ANGY ERP",
+  "name": "ERP — Gestion de production",
+  "short_name": "ERP",
   "description": "Production, stock, ventes, caisse et rentabilité — un produit Angy Company",
   "lang": "fr",
   "start_url": "/app/dashboard",

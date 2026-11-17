@@ -4,7 +4,7 @@ import { useRouter } from 'next/router';
 import { money, date } from '../../lib/client';
 import { waLink } from '../../components/Chrome';
 
-// Reçu d'abonnement ANGY ERP (console Angy Company), numéroté ANGY-AAAA-0001.
+// Reçu d'abonnement ERP (console Angy Company), numéroté ANGY-AAAA-0001.
 const MODES = { wave: 'Wave', orange_money: 'Orange Money', especes: 'Espèces', virement: 'Virement', autre: 'Autre' };
 const S = {
   page: { maxWidth: 760, margin: '0 auto', padding: '36px 40px', background: '#fff', minHeight: '100vh', fontSize: 13, color: '#17221d' },
@@ -24,7 +24,7 @@ export default function Recu() {
   if (err) return <div style={S.page}>{err === 'Connexion requise' ? 'Connectez-vous d\'abord à la console Angy Company.' : err}</div>;
   if (!p) return <div style={S.page}>Chargement…</div>;
   const a = p.angy || {};
-  const msg = `Bonjour ${p.contact_name || ''},\n\nAngy Company confirme la réception de votre paiement ANGY ERP :\nReçu ${p.number || ''} du ${date(p.date)}\nEntreprise : ${p.company}\nMontant : ${money(p.amount)}${p.period_label ? `\nPériode : ${p.period_label}` : ''}${p.new_end ? `\nAbonnement valable jusqu'au ${date(p.new_end)}` : ''}\n\nMerci de votre confiance !`;
+  const msg = `Bonjour ${p.contact_name || ''},\n\nAngy Company confirme la réception de votre paiement ERP :\nReçu ${p.number || ''} du ${date(p.date)}\nEntreprise : ${p.company}\nMontant : ${money(p.amount)}${p.period_label ? `\nPériode : ${p.period_label}` : ''}${p.new_end ? `\nAbonnement valable jusqu'au ${date(p.new_end)}` : ''}\n\nMerci de votre confiance !`;
   return (
     <div style={S.page}>
       <Head><title>{`Reçu ${p.number || ''} — Angy Company`}</title></Head>
@@ -34,7 +34,7 @@ export default function Recu() {
       </div>
       <div style={S.head}>
         <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}><span style={{ fontWeight: 900, fontSize: 22, letterSpacing: 1 }}>ANGY</span><img src="/img/logo.webp" alt="ERP" height={30} /></div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}><img src="/img/logo.webp" alt="ERP" height={30} /></div>
           <div style={{ color: '#4b5a52', marginTop: 6, lineHeight: 1.5 }}>
             <div><b>Angy Company</b></div>
             {a.adresse && <div>{a.adresse}</div>}
@@ -53,7 +53,7 @@ export default function Recu() {
         {p.contact_name && <div>{p.contact_name}</div>}{p.company_address && <div>{p.company_address}</div>}{p.company_phone && <div>{p.company_phone}</div>}
       </div>
       <table style={{ width: '100%', borderCollapse: 'collapse' }}><tbody>
-        <tr><td style={S.td}>Objet</td><td style={{ ...S.td, fontWeight: 700 }}>Abonnement au logiciel ANGY ERP{p.period_label ? ` — ${p.period_label}` : ''}</td></tr>
+        <tr><td style={S.td}>Objet</td><td style={{ ...S.td, fontWeight: 700 }}>Abonnement au logiciel ERP{p.period_label ? ` — ${p.period_label}` : ''}</td></tr>
         <tr><td style={S.td}>Mode de paiement</td><td style={S.td}>{MODES[p.method] || p.method || '—'}</td></tr>
         {p.new_end && <tr><td style={S.td}>Abonnement valable jusqu'au</td><td style={S.td}>{date(p.new_end)}</td></tr>}
         {p.note && <tr><td style={S.td}>Note</td><td style={S.td}>{p.note}</td></tr>}

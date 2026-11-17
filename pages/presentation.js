@@ -3,7 +3,7 @@ import Head from 'next/head';
 import { api } from '../lib/client';
 import { waLink } from '../components/Chrome';
 
-// Page commerciale d'ANGY ERP (Angy Company) : ce que fait le logiciel, pour qui, et comment l'essayer.
+// Page commerciale d'ERP (Angy Company) : ce que fait le logiciel, pour qui, et comment l'essayer.
 const FEATURES = [
   ['⚡', 'Production en 1 minute', 'Tapez les litres produits : les matières et emballages sont retirés du stock selon vos recettes, le coût par sachet ou bouteille est calculé tout seul.'],
   ['💰', 'Bénéfice de chaque production', 'Ce que chaque production a coûté, ce qu\'elle va rapporter et ce qu\'elle a déjà rapporté, lot par lot.'],
@@ -29,15 +29,15 @@ const STEPS = [
 export default function Presentation() {
   const [ct, setCt] = useState({});
   useEffect(() => { api('auth/contact').then(setCt).catch(() => {}); }, []);
-  const wa = ct.whatsapp ? waLink(ct.whatsapp, 'Bonjour Angy Company, je souhaite une démonstration d\'ANGY ERP pour mon entreprise.') : null;
+  const wa = ct.whatsapp ? waLink(ct.whatsapp, 'Bonjour Angy Company, je souhaite une démonstration d\'ERP pour mon entreprise.') : null;
   return (
     <div className="pr">
       <Head>
-        <title>ANGY ERP — Logiciel de gestion de production | Angy Company</title>
-        <meta name="description" content="ANGY ERP : production, stock par lots, coût et bénéfice de chaque production, ventes, caisse Wave / Orange Money, commandes, qualité HACCP. Un produit Angy Company, Dakar." />
+        <title>ERP — Logiciel de gestion de production | Angy Company</title>
+        <meta name="description" content="ERP : production, stock par lots, coût et bénéfice de chaque production, ventes, caisse Wave / Orange Money, commandes, qualité HACCP. Un produit Angy Company, Dakar." />
       </Head>
       <header className="pr-top">
-        <a href="/" className="logo"><span className="logo-word">ANGY</span><img src="/img/logo.webp" alt="ERP" height={30} /></a>
+        <a href="/" className="logo"><img src="/img/logo.webp" alt="ERP" height={30} /></a>
         <nav>
           <a href="#fonctions">Fonctions</a><a href="#comment">Comment ça marche</a><a href="#contact">Contact</a>
           <a className="lp-btn ghost sm" href="/">Connexion</a>
@@ -48,7 +48,7 @@ export default function Presentation() {
         <div className="pr-in">
           <span className="lp-badge"><span className="flag" aria-hidden><i /><i /><i /></span>Fait au Sénégal · pour les entreprises de production</span>
           <h1>Sachez enfin <span className="lp-grad">combien rapporte</span> chaque production.</h1>
-          <p>ANGY ERP rassemble votre stock, vos productions, vos ventes, votre caisse et votre qualité dans un seul logiciel simple, en français, pensé pour les entreprises d'ici — Wave, Orange Money, vendeurs, commandes, WhatsApp.</p>
+          <p>ERP rassemble votre stock, vos productions, vos ventes, votre caisse et votre qualité dans un seul logiciel simple, en français, pensé pour les entreprises d'ici — Wave, Orange Money, vendeurs, commandes, WhatsApp.</p>
           <div className="lp-cta">
             <a className="lp-btn lg" href="/?signup=1&demo=1">Essayer gratuitement</a>
             {wa ? <a className="lp-btn ghost lg" href={wa} target="_blank" rel="noreferrer">Demander une démo</a> : <a className="lp-btn ghost lg" href="#contact">Nous contacter</a>}
@@ -97,7 +97,7 @@ export default function Presentation() {
         </div>
         <p className="pr-contact">{[ct.telephone && `Tél. ${ct.telephone}`, ct.email, ct.adresse].filter(Boolean).join(' · ')}</p>
       </section>
-      <footer className="pr-foot">© Angy Company — ANGY ERP · {ct.adresse || 'Dakar, Sénégal'}</footer>
+      <footer className="pr-foot">© Angy Company — ERP · {ct.adresse || 'Dakar, Sénégal'}</footer>
     </div>
   );
 }

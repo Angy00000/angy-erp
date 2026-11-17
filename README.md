@@ -1,4 +1,4 @@
-# ANGY ERP
+# ERP
 
 Logiciel de gestion complet pour entreprises de production — par Angy Company.
 

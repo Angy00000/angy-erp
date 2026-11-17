@@ -70,7 +70,7 @@ export default function AppShell() {
     <div className="shell">
       <aside className={'side' + (open ? ' open' : '')}>
         <div className="side-head">
-          <div className="logo"><span className="logo-word">ANGY</span><img src="/img/logo.webp" alt="ERP" height={28} /></div>
+          <div className="logo"><img src="/img/logo.webp" alt="ERP" height={28} /></div>
           <div className="company">{me.company?.logo && <img src={me.company.logo} alt="" />}<span>{me.company?.name}</span></div>
         </div>
         <nav className="nav">
@@ -92,7 +92,7 @@ export default function AppShell() {
             <button className="side-ic" title="Se déconnecter" onClick={logout}><Ic n="logout" s={16} /></button>
           </div>
           <InstallApp />
-          <div className="side-sign">ANGY ERP · un produit Angy Company<br /><span title="Version installée">Version {CHANGELOG[0]?.v}</span></div>
+          <div className="side-sign">ERP · un produit Angy Company<br /><span title="Version installée">Version {CHANGELOG[0]?.v}</span></div>
         </div>
       </aside>
       <div className="main">
@@ -136,11 +136,11 @@ function Blocked({ msg, company, contact, onLogout }) {
       <div className="lp-bg on" style={{ backgroundImage: 'url(/img/usine-1.webp)' }} />
       <div className="lp-shade" />
       <div className="blk-card">
-        <div className="logo" style={{ justifyContent: 'center', marginBottom: 18 }}><span className="logo-word">ANGY</span><img src="/img/logo.webp" alt="ERP" height={34} /></div>
+        <div className="logo" style={{ justifyContent: 'center', marginBottom: 18 }}><img src="/img/logo.webp" alt="ERP" height={34} /></div>
         <h2>{company?.name}</h2>
         <p>{msg}</p>
         <p className="lp-sub">Vos données sont conservées et seront de nouveau accessibles dès la réactivation.</p>
-        {contact.whatsapp && <a className="lp-btn lg full" href={waLink(contact.whatsapp, `Bonjour Angy Company, je vous contacte pour l'abonnement ANGY ERP de ${company?.name || 'mon entreprise'}.`)} target="_blank" rel="noreferrer">Contacter Angy Company sur WhatsApp</a>}
+        {contact.whatsapp && <a className="lp-btn lg full" href={waLink(contact.whatsapp, `Bonjour Angy Company, je vous contacte pour l'abonnement ERP de ${company?.name || 'mon entreprise'}.`)} target="_blank" rel="noreferrer">Contacter Angy Company sur WhatsApp</a>}
         {!contact.whatsapp && contact.telephone && <p className="lp-sub">Angy Company : <b>{contact.telephone}</b></p>}
         <button className="lp-btn ghost lg full" style={{ marginTop: 10 }} onClick={onLogout}>Se déconnecter</button>
       </div>

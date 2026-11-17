@@ -20,7 +20,7 @@ export default function ImprimePage() {
         const data = {};
         for (const e of d.need || []) data[e] = await crud.list(e, { limit: 1000 }).catch(() => []);
         setCtx({ c: me.company, data });
-      } catch (e) { setErr(e.status === 401 ? 'Connectez-vous d\'abord à ANGY ERP.' : e.message); }
+      } catch (e) { setErr(e.status === 401 ? 'Connectez-vous d\'abord à ERP.' : e.message); }
     })();
   }, [d]);
   if (!doc) return null;

@@ -43,7 +43,7 @@ export default function Auth() {
       <div className="lp-stars" aria-hidden>{Array.from({ length: 18 }).map((_, i) => <i key={i} style={{ left: `${(i * 53) % 100}%`, top: `${(i * 37) % 100}%`, animationDelay: `${(i % 6) * 0.9}s` }} />)}</div>
 
       <header className="lp-top">
-        <div className="logo"><span className="logo-word">ANGY</span><img src="/img/logo.webp" alt="ERP" height={34} /></div>
+        <div className="logo"><img src="/img/logo.webp" alt="ERP" height={34} /></div>
         <div className="lp-top-r">
           <a className="lp-btn ghost sm lp-hide-m" href="/presentation">Découvrir</a>
           <button className={'lp-btn ghost sm' + (mode === 'login' ? ' act' : '')} onClick={() => go('login')}>Connexion</button>
@@ -94,7 +94,7 @@ export default function Auth() {
         </div>
         <div className="lp-bars">{SLIDES.map((_, i) => <button key={i} aria-label={`Image ${i + 1}`} onClick={() => setSlide(i)} className={i === slide ? 'on' : i < slide ? 'done' : ''}><i key={i === slide ? slide : 'x'} /></button>)}</div>
         <div className="lp-copy">
-          {ct.whatsapp && <a className="lp-wa" href={waLink(ct.whatsapp, 'Bonjour Angy Company, je souhaite en savoir plus sur ANGY ERP.')} target="_blank" rel="noreferrer">WhatsApp {ct.whatsapp}</a>}
+          {ct.whatsapp && <a className="lp-wa" href={waLink(ct.whatsapp, 'Bonjour Angy Company, je souhaite en savoir plus sur ERP.')} target="_blank" rel="noreferrer">WhatsApp {ct.whatsapp}</a>}
           © Angy Company — {ct.adresse || 'Dakar, Sénégal'}
         </div>
       </footer>

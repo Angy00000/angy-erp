@@ -150,13 +150,13 @@ export function InstallApp() {
     <>
       <button className="install-btn" onClick={click}>📲 Installer l'application</button>
       {tip && (
-        <Modal title="Installer ANGY ERP sur l'iPhone" onClose={() => setTip(false)} footer={<button className="btn primary" onClick={() => setTip(false)}>Compris</button>}>
+        <Modal title="Installer ERP sur l'iPhone" onClose={() => setTip(false)} footer={<button className="btn primary" onClick={() => setTip(false)}>Compris</button>}>
           <ol className="install-steps">
-            <li>Ouvrez ANGY ERP dans <b>Safari</b>.</li>
+            <li>Ouvrez ERP dans <b>Safari</b>.</li>
             <li>Touchez le bouton <b>Partager</b> (le carré avec une flèche vers le haut).</li>
             <li>Choisissez <b>« Sur l'écran d'accueil »</b>, puis <b>Ajouter</b>.</li>
           </ol>
-          <p className="muted small">L'icône ANGY ERP apparaît sur votre écran : le logiciel s'ouvre comme une application.</p>
+          <p className="muted small">L'icône ERP apparaît sur votre écran : le logiciel s'ouvre comme une application.</p>
         </Modal>
       )}
     </>
@@ -203,7 +203,7 @@ export function UpdateBanner() {
   return (
     <div className="maj">
       <span className="maj-ic">⟳</span>
-      <span><b>Nouvelle version d'ANGY ERP disponible.</b> Terminez ce que vous faites, puis mettez à jour.</span>
+      <span><b>Nouvelle version d'ERP disponible.</b> Terminez ce que vous faites, puis mettez à jour.</span>
       <button className="btn sm accent" onClick={update}>Mettre à jour</button>
     </div>
   );
@@ -224,7 +224,7 @@ export function WhatsNew({ list }) {
   if (!show?.length) return null;
   const close = () => { try { localStorage.setItem('erp_seen_version', list[0].v); } catch { /* */ } setShow(null); };
   return (
-    <Modal title="✨ Nouveautés d'ANGY ERP" onClose={close} footer={<button className="btn primary" onClick={close}>Compris</button>}>
+    <Modal title="✨ Nouveautés d'ERP" onClose={close} footer={<button className="btn primary" onClick={close}>Compris</button>}>
       {show.map((e) => (
         <div key={e.v} className="news">
           <div className="news-h"><b>{e.title}</b><span>{e.date}</span></div>

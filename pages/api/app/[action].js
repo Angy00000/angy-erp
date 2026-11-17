@@ -167,7 +167,7 @@ export default handler(async (req, res, user) => {
       if (Number(dep.n) > 0) L.push('', `🚶 *Chez les vendeurs* : ${F(dep.v)} de produits (${dep.n} dépôt${Number(dep.n) > 1 ? 's' : ''} en cours)`);
       if (Number(debt.d) > 0.5) L.push(`${Number(dep.n) > 0 ? '' : '\n'}📌 *Reste à encaisser (clients et vendeurs)* : ${F(debt.d)}`);
     }
-    L.push('', '_Envoyé depuis ANGY ERP_');
+    L.push('', '_Envoyé depuis ERP_');
     out.text = L.join('\n');
     return out;
   }

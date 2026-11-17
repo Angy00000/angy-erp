@@ -89,7 +89,7 @@ export default function Aide({ contact }) {
             <details key={t} className="guide"><summary>{t}</summary><p>{d}</p></details>
           ))}
         </div>
-        {ct.whatsapp && <a className="panel wa" href={waLink(ct.whatsapp, 'Bonjour Angy Company, j\'ai besoin d\'aide sur ANGY ERP.')} target="_blank" rel="noreferrer">
+        {ct.whatsapp && <a className="panel wa" href={waLink(ct.whatsapp, 'Bonjour Angy Company, j\'ai besoin d\'aide sur ERP.')} target="_blank" rel="noreferrer">
           <Ic n="whatsapp" s={22} /><span><b>Écrire sur WhatsApp</b><small>Réponse rapide de l'équipe Angy Company · {ct.whatsapp}</small></span></a>}
         {(ct.telephone || ct.email) && <div className="panel" style={{ marginTop: 14 }}>
           <div className="panel-h"><span className="panel-ic"><Ic n="phone" s={16} /></span><h3>Contacter Angy Company</h3></div>

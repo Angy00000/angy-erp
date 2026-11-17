@@ -39,7 +39,7 @@ export default function Etiquettes() {
         setCtx({ c: me.company, lots });
         const q = router.query.lot ? Number(router.query.lot) : lots[0]?.id;
         if (q) setLotId(String(q));
-      } catch (e) { setErr(e.status === 401 ? 'Connectez-vous d\'abord à ANGY ERP.' : e.message); }
+      } catch (e) { setErr(e.status === 401 ? 'Connectez-vous d\'abord à ERP.' : e.message); }
     })();
   }, [router.isReady, router.query.lot]);
 

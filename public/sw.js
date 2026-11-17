@@ -1,4 +1,4 @@
-// Service worker ANGY ERP : rend l'application installable et garde les fichiers de l'interface
+// Service worker ERP : rend l'application installable et garde les fichiers de l'interface
 // en cache pour un démarrage rapide. Les données (API) passent toujours par le réseau.
 const CACHE = 'angy-erp-v1';
 const OFFLINE = '/offline.html';

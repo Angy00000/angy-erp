@@ -26,7 +26,7 @@ export default function ConsolePage() {
   useEffect(() => { check(); }, [check]);
   return (
     <>
-      <Head><title>Console Angy Company — ANGY ERP</title></Head>
+      <Head><title>Console Angy Company — ERP</title></Head>
       {state === 'loading' && <div className="spinner" style={{ paddingTop: 120 }}>Chargement…</div>}
       {state === 'out' && <Login onOk={check} />}
       {state === 'in' && <ConsoleApp admin={admin} onLogout={async () => { await call('logout', {}); setState('out'); }} />}
@@ -41,7 +41,7 @@ function Login({ onOk }) {
     <div className="lp">
       <div className="lp-bg on" style={{ backgroundImage: 'url(/img/erp.webp)' }} />
       <div className="lp-shade" />
-      <header className="lp-top"><div className="logo"><span className="logo-word">ANGY</span><img src="/img/logo.webp" alt="ERP" height={34} /></div><span className="lp-badge">Console de la plateforme</span></header>
+      <header className="lp-top"><div className="logo"><img src="/img/logo.webp" alt="ERP" height={34} /></div><span className="lp-badge">Console de la plateforme</span></header>
       <main className="lp-main" style={{ gridTemplateColumns: 'minmax(0,1fr) minmax(340px,420px)' }}>
         <section className="lp-hero">
           <h1>Console <span className="lp-grad">Angy Company.</span></h1>
@@ -71,12 +71,12 @@ function ConsoleApp({ admin, onLogout }) {
   return (
     <div className="shell">
       <aside className={'side' + (open ? ' open' : '')}>
-        <div className="side-head"><div className="logo"><span className="logo-word">ANGY</span><img src="/img/logo.webp" alt="ERP" height={28} /></div><div className="company">Console Angy Company</div></div>
+        <div className="side-head"><div className="logo"><img src="/img/logo.webp" alt="ERP" height={28} /></div><div className="company">Console Angy Company</div></div>
         <nav className="nav">{NAV.map(([k, l, ic]) => <a key={k} href="#" className={tab === k ? 'on' : ''} onClick={(e) => { e.preventDefault(); go(k); }}><span className="ic"><Ic n={ic} s={16} /></span>{l}</a>)}</nav>
         <div className="side-foot"><div className="side-user"><span className="avatar">{(admin?.name || 'A')[0]}</span><div className="who"><b>{admin?.name}</b><span>Équipe Angy Company</span></div><button className="side-ic" onClick={onLogout} title="Se déconnecter"><Ic n="logout" s={16} /></button></div></div>
       </aside>
       <div className="main">
-        <header className="topbar2"><button className="icon-btn menu-btn" onClick={() => setOpen(true)}><Ic n="menu" s={20} /></button><b className="muted">Console de la plateforme ANGY ERP</b><span style={{ flex: 1 }} /><a className="btn sm" href="/" target="_blank" rel="noreferrer">Voir le site</a></header>
+        <header className="topbar2"><button className="icon-btn menu-btn" onClick={() => setOpen(true)}><Ic n="menu" s={20} /></button><b className="muted">Console de la plateforme ERP</b><span style={{ flex: 1 }} /><a className="btn sm" href="/" target="_blank" rel="noreferrer">Voir le site</a></header>
         <UpdateBanner />
         <div className="content">
           <div className="page-head"><div><h1>{NAV.find((x) => x[0] === tab)?.[1]}</h1></div></div>
@@ -193,7 +193,7 @@ function Companies({ focus }) {
 }
 
 function Credentials({ title, r, onClose }) {
-  const text = `Bonjour,\n\nVoici vos accès à ANGY ERP :\nLien : ${typeof window !== 'undefined' ? window.location.origin : ''}\nEmail : ${r.email}\nMot de passe : ${r.password}\n\nPensez à changer votre mot de passe après la première connexion (icône clé en bas du menu).\n\nAngy Company`;
+  const text = `Bonjour,\n\nVoici vos accès à ERP :\nLien : ${typeof window !== 'undefined' ? window.location.origin : ''}\nEmail : ${r.email}\nMot de passe : ${r.password}\n\nPensez à changer votre mot de passe après la première connexion (icône clé en bas du menu).\n\nAngy Company`;
   return (
     <Modal title={title} onClose={onClose} footer={<><button className="btn" onClick={() => { navigator.clipboard?.writeText(text); toast('Copié'); }}>Copier le message</button><button className="btn primary" onClick={onClose}>Fermer</button></>}>
       <div className="note" style={{ marginBottom: 12 }}>Notez ce mot de passe maintenant : il ne pourra plus être affiché ensuite.</div>
@@ -238,7 +238,7 @@ function ManageCompany({ c, onClose, onCreds }) {
       <div className="row" style={{ marginBottom: 12 }}>
         <span className={'badge ' + STATUS[c.status]?.[1]}>{STATUS[c.status]?.[0]}</span>
         <span className="muted small">{c.sub_end ? `Fin : ${date(c.sub_end)} (${c.days_left} j)` : 'Sans limite'} · Payé au total : {money(c.paid_total)}</span>
-        {c.phone && <a className="btn sm" href={waLink(c.phone, `Bonjour ${c.contact_name || ''}, ici Angy Company au sujet de votre espace ANGY ERP.`)} target="_blank" rel="noreferrer"><Ic n="whatsapp" s={14} /> WhatsApp</a>}
+        {c.phone && <a className="btn sm" href={waLink(c.phone, `Bonjour ${c.contact_name || ''}, ici Angy Company au sujet de votre espace ERP.`)} target="_blank" rel="noreferrer"><Ic n="whatsapp" s={14} /> WhatsApp</a>}
       </div>
       <Tabs value={tab} onChange={setTab} tabs={[['infos', 'Informations'], ['pay', 'Paiement / prolongation'], ['acces', 'Accès & utilisateurs']]} />
       {tab === 'infos' && <>
@@ -272,8 +272,8 @@ function ManageCompany({ c, onClose, onCreds }) {
 }
 
 const relanceText = (c) => c.days_left < 0
-  ? `Bonjour ${c.contact_name || ''}, ici Angy Company. L'abonnement ANGY ERP de ${c.name} a expiré le ${date(c.sub_end)}. Pour retrouver l'accès, merci de procéder au renouvellement${Number(c.price) ? ` (${money(c.price)} ${PERIOD[c.periodicity] || ''})` : ''}. Merci de votre confiance !`
-  : `Bonjour ${c.contact_name || ''}, ici Angy Company. ${c.status === 'essai' ? 'La période d\'essai' : 'L\'abonnement'} ANGY ERP de ${c.name} se termine le ${date(c.sub_end)} (dans ${c.days_left} jour(s)). Pour continuer sans interruption, merci de procéder au renouvellement${Number(c.price) ? ` (${money(c.price)} ${PERIOD[c.periodicity] || ''})` : ''}. Merci de votre confiance !`;
+  ? `Bonjour ${c.contact_name || ''}, ici Angy Company. L'abonnement ERP de ${c.name} a expiré le ${date(c.sub_end)}. Pour retrouver l'accès, merci de procéder au renouvellement${Number(c.price) ? ` (${money(c.price)} ${PERIOD[c.periodicity] || ''})` : ''}. Merci de votre confiance !`
+  : `Bonjour ${c.contact_name || ''}, ici Angy Company. ${c.status === 'essai' ? 'La période d\'essai' : 'L\'abonnement'} ERP de ${c.name} se termine le ${date(c.sub_end)} (dans ${c.days_left} jour(s)). Pour continuer sans interruption, merci de procéder au renouvellement${Number(c.price) ? ` (${money(c.price)} ${PERIOD[c.periodicity] || ''})` : ''}. Merci de votre confiance !`;
 
 function Payments({ go }) {
   const { data, err, reload } = useCall('payments');
@@ -390,7 +390,7 @@ function Team({ admin }) {
   if (err) return <div className="err">{err}</div>;
   if (!data) return <div className="spinner">Chargement…</div>;
   const save = async () => { try { const r = await call('team_save', edit); setEdit(null); reload(); if (r.password) setCreds(r); else toast('Enregistré'); } catch (e) { toast(e.message, 'error'); } };
-  const credText = creds && `Bonjour ${creds.name},\n\nVoici ton accès à la console Angy Company (ANGY ERP) :\nLien : ${typeof window !== 'undefined' ? window.location.origin : ''}/console\nEmail : ${creds.email}\nMot de passe provisoire : ${creds.password}\n\nChange-le dans « Mon compte » dès la première connexion.`;
+  const credText = creds && `Bonjour ${creds.name},\n\nVoici ton accès à la console Angy Company (ERP) :\nLien : ${typeof window !== 'undefined' ? window.location.origin : ''}/console\nEmail : ${creds.email}\nMot de passe provisoire : ${creds.password}\n\nChange-le dans « Mon compte » dès la première connexion.`;
   return (
     <>
       <div className="toolbar"><span className="muted small">Le <b>propriétaire</b> a tous les droits. Un <b>membre</b> gère les entreprises, paiements, demandes et annonces, mais ne touche ni à l'équipe ni aux réglages.</span><div className="grow" />
