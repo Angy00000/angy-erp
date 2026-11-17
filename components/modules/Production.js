@@ -526,7 +526,34 @@ export function QuickProd({ onClose, initial, note, edit }) {
     const other = first && products.find((x) => !used.includes(x.id) && base(x.name) === base(first.name));
     setRows((r) => [...r, other ? { product_id: other.id } : {}]);
   };
+  // Vérifications avant d'enregistrer : emballages et ingrédients oubliés (simple avertissement, ne change aucun calcul)
+  const warnings = (() => {
+    const out = [];
+    if (!valid.length) return out;
+    const norm = (u) => String(u || '').toLowerCase().trim().replace(/s$/, '');
+    const usedQty = (id) => usedRows.filter((x) => Number(x.item_id) === id).reduce((s2, x) => s2 + (Number(x.qty) || 0), 0);
+    // 1. Emballages : autant de sachets / bouteilles vides que de sachets / bouteilles de jus
+    const made = new Map();
+    for (const c of valid) { const u = norm(c.p.unit); if (u) made.set(u, (made.get(u) || 0) + c.qty); }
+    for (const [u, q] of made) {
+      const pack = stockItems.filter((x) => x.type === 'emballage' && norm(x.unit) === u);
+      if (!pack.length) continue;
+      const took = pack.reduce((s2, x) => s2 + usedQty(x.id), 0);
+      if (took + 0.5 < q) out.push(`Vous avez produit ${num(q)} ${u}s de jus, mais seulement ${num(took)} ${u}${took > 1 ? 's' : ''} vide${took > 1 ? 's' : ''} ${took > 1 ? 'sont sortis' : 'est sorti'} du stock (${pack.map((x) => String(x.name).trim()).join(' / ')}).`);
+    }
+    // 2. Recettes : un ingrédient prévu absent ou très en dessous
+    if (withRecipe.length) {
+      const exp = new Map(fromRecipes().rows.map((x) => [Number(x.item_id), Number(x.qty)]));
+      for (const [id, q] of exp) {
+        const it = stockItems.find((x) => x.id === id); if (!it || it.type === 'emballage') continue;
+        const took = usedQty(id);
+        if (q > 0 && took < q * 0.5) out.push(`${String(it.name).trim()} : la recette prévoit ${num(Math.round(q * 100) / 100)} ${it.unit || ''}, vous avez mis ${num(took)}.`);
+      }
+    }
+    return out;
+  })();
   const submit = async () => {
+    if (warnings.length && !confirmDo(`Attention :\n\n• ${warnings.join('\n• ')}\n\nEnregistrer quand même ?`)) return;
     setErr(null); setBusy(true);
     try {
       const { _exp_manual, _lab_manual, ...dd } = d; // eslint-disable-line no-unused-vars
@@ -544,6 +571,7 @@ export function QuickProd({ onClose, initial, note, edit }) {
     <Modal wide title={edit ? `✏️ Modifier la production ${edit.numbers.join(', ')}` : '⚡ Production rapide'} onClose={() => onClose(null)}
       footer={<>{edit && <button className="btn danger" style={{ marginRight: 'auto' }} disabled={busy} onClick={remove}>Supprimer cette production</button>}<button className="btn" onClick={() => onClose(null)}>Fermer</button><button className="btn primary" disabled={busy} onClick={submit}>{busy ? 'Enregistrement…' : edit ? 'Enregistrer les corrections' : 'Enregistrer la production'}</button></>}>
       {err && <div className="err">{err}</div>}
+      {warnings.length > 0 && <div className="warn-box">⚠️ <b>Oubli ?</b><ul>{warnings.map((w) => <li key={w}>{w}</li>)}</ul></div>}
       {edit && <div className="note" style={{ marginBottom: 12 }}>Corrigez ce qui est faux : litres, formats, ce qui a été pris dans le magasin, dépenses, date. <b>Le stock, la caisse, le coût par unité et le bénéfice sont recalculés automatiquement.</b> On ne peut pas descendre en dessous de ce qui a déjà été vendu.</div>}
       {note && <div className="note" style={{ marginBottom: 12 }}>{note}</div>}
       <h3 style={{ fontSize: 14, margin: '0 0 8px' }}>Ce qui a été produit</h3>
