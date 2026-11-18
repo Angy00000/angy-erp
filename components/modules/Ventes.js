@@ -1,6 +1,6 @@
-import { useState } from 'react';
-import { op, crud, money, num, date, opts, today, LABELS } from '../../lib/client';
-import { Tabs, Badge, Modal, useRefOptions, useData, run, confirmDo, invalidateRefs, toast } from '../ui';
+import { useState, useMemo } from 'react';
+import { api, op, crud, money, num, date, opts, today, LABELS } from '../../lib/client';
+import { Tabs, Badge, Modal, Stat, useRefOptions, useData, run, confirmDo, invalidateRefs, toast } from '../ui';
 import Commandes from './Commandes';
 import Depots from './Depots';
 import Dettes from './Dettes';
@@ -13,8 +13,9 @@ export default function Ventes({ can, company }) {
   const [tab, setTab] = useState('pos');
   return (
     <div>
-      <Tabs value={tab} onChange={setTab} tabs={[['pos', 'Point de vente'], ['cmd', 'Commandes clients'], ['depots', 'Vendeurs & dépôts'], ['docs', 'Factures, devis & commandes'], ['dettes', 'Dettes clients'], ['clients', 'Clients'], ['pay', 'Encaissements']]} />
+      <Tabs value={tab} onChange={setTab} tabs={[['pos', 'Point de vente'], ['hist', '📜 Historique des ventes'], ['cmd', 'Commandes clients'], ['depots', 'Vendeurs & dépôts'], ['docs', 'Factures, devis & commandes'], ['dettes', 'Dettes clients'], ['clients', 'Clients'], ['pay', 'Encaissements']]} />
       {tab === 'pos' && <POS />}
+      {tab === 'hist' && <SalesHistory />}
       {tab === 'cmd' && <Commandes canProduce={!can || can('production')} />}
       {tab === 'depots' && <Depots />}
       {tab === 'dettes' && <Dettes company={company} />}
@@ -339,5 +340,154 @@ export function SaleEdit({ id, onClose }) {
         {total - paid > 0.009 && <div className="badge red">Reste dû : {money(total - paid)}</div>}
       </div>
     </Modal>
+  );
+}
+
+// ───────────── Historique des ventes : voir clairement chaque vente et la corriger ─────────────
+const iso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+const addDays = (n) => { const d = new Date(); d.setDate(d.getDate() + n); return iso(d); };
+const PERIODS_H = [
+  ['today', "Aujourd'hui", () => [today(), today()]],
+  ['yesterday', 'Hier', () => [addDays(-1), addDays(-1)]],
+  ['week', '7 derniers jours', () => [addDays(-6), today()]],
+  ['month', 'Ce mois', () => [today().slice(0, 8) + '01', today()]],
+  ['all', 'Tout', () => ['', '']],
+];
+const shortName = (s) => String(s || '').replace(/^jus de /i, '').replace(/\s*\((.*)\)\s*$/, ' · $1');
+const dayTitle = (d) => {
+  const k = String(d).slice(0, 10);
+  if (k === today()) return "Aujourd'hui";
+  if (k === addDays(-1)) return 'Hier';
+  const t = new Date(k + 'T12:00:00').toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+  return t.charAt(0).toUpperCase() + t.slice(1);
+};
+const hour = (v) => (v ? new Date(v).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : '');
+const saleState = (d) => (d.status === 'annule' ? ['Annulée', 'gray'] : d.total - d.paid > 0.009 ? [d.paid > 0 ? `Doit ${money(d.total - d.paid)}` : `Pas payée · ${money(d.total)}`, 'red'] : ['Payée', 'green']);
+
+function SalesHistory() {
+  const [period, setPeriod] = useState('today');
+  const [range, setRange] = useState(() => PERIODS_H[0][2]());
+  const [qs, setQs] = useState('');
+  const [state, setState] = useState('all');
+  const [seller, setSeller] = useState('');
+  const [open, setOpen] = useState({});
+  const [modal, setModal] = useState(null);
+  const accounts = useRefOptions('accounts', { active: true });
+  const { data, reload } = useData(() => api(`app/sales_history?from=${range[0]}&to=${range[1]}`), [range[0], range[1]]);
+  const list = data || [];
+  const sellers = useMemo(() => [...new Map(list.filter((d) => d.user_id).map((d) => [d.user_id, d.user_name])).entries()], [data]);
+  const shown = list.filter((d) => {
+    if (state === 'paid' && (d.status === 'annule' || d.total - d.paid > 0.009)) return false;
+    if (state === 'due' && (d.status === 'annule' || d.total - d.paid <= 0.009)) return false;
+    if (state === 'cancel' && d.status !== 'annule') return false;
+    if (state !== 'cancel' && state !== 'all' && d.status === 'annule') return false;
+    if (seller && String(d.user_id) !== seller) return false;
+    if (qs.trim()) {
+      const t = qs.trim().toLowerCase();
+      const hay = [d.number, d.customer_name, d.customer_phone, d.user_name, ...d.lines.map((l) => l.name)].join(' ').toLowerCase();
+      if (!hay.includes(t)) return false;
+    }
+    return true;
+  });
+  const live = shown.filter((d) => d.status !== 'annule');
+  const sum = (arr, f) => arr.reduce((s, x) => s + f(x), 0);
+  const days = [];
+  for (const d of shown) { const k = String(d.date).slice(0, 10); let g = days.find((x) => x.k === k); if (!g) days.push(g = { k, list: [] }); g.list.push(d); }
+  const after = (ok) => { setModal(null); if (ok) { invalidateRefs('items'); invalidateRefs('accounts'); reload(); } };
+  const cancelSale = async (d) => {
+    const msg = d.paid > 0 ? `Annuler la vente ${d.number} ? Les ${money(d.paid)} encaissés seront sortis de la caisse (rendus au client) et les produits remis en stock.` : `Annuler la vente ${d.number} ? Les produits seront remis en stock.`;
+    if (!confirmDo(msg)) return;
+    await run(async () => { if (d.paid > 0) await op('sale_refund', { id: d.id }); await op('sale_cancel', { id: d.id }); }, 'Vente annulée');
+    invalidateRefs('items'); invalidateRefs('accounts'); reload();
+  };
+
+  return (
+    <div>
+      <div className="toolbar" style={{ flexWrap: 'wrap', gap: 8 }}>
+        <div className="seg hist-seg">{PERIODS_H.map(([k, l, f]) => <button key={k} className={period === k ? 'on' : ''} onClick={() => { setPeriod(k); setRange(f()); }}>{l}</button>)}</div>
+        <div className="row" style={{ gap: 6, alignItems: 'center' }}>
+          <input className="input hist-date" type="date" value={range[0]} onChange={(e) => { setPeriod('custom'); setRange([e.target.value, range[1] || e.target.value]); }} />
+          <span className="muted">au</span>
+          <input className="input hist-date" type="date" value={range[1]} onChange={(e) => { setPeriod('custom'); setRange([range[0] || e.target.value, e.target.value]); }} />
+        </div>
+      </div>
+      <div className="toolbar" style={{ flexWrap: 'wrap', gap: 8, marginTop: 8 }}>
+        <input className="input" style={{ maxWidth: 300 }} placeholder="🔎 Client, n° de vente, produit…" value={qs} onChange={(e) => setQs(e.target.value)} />
+        <div className="type-chips" style={{ marginBottom: 0 }}>{[['all', 'Toutes'], ['paid', 'Payées'], ['due', 'Pas encore payées'], ['cancel', 'Annulées']].map(([k, l]) => <button key={k} className={'chip' + (state === k ? ' on' : '')} onClick={() => setState(k)}>{l}</button>)}</div>
+        {sellers.length > 1 && <select className="input" style={{ maxWidth: 200 }} value={seller} onChange={(e) => setSeller(e.target.value)}><option value="">Tous les vendeurs</option>{sellers.map(([id, nm]) => <option key={id} value={id}>{nm}</option>)}</select>}
+      </div>
+
+      <div className="grid g4 hist-stats" style={{ margin: '14px 0' }}>
+        <Stat k="Ventes" v={live.length} s={shown.length - live.length ? `+ ${shown.length - live.length} annulée(s)` : 'sur la période'} />
+        <Stat k="Total vendu" v={money(sum(live, (d) => d.total))} s={`${num(sum(live, (d) => d.lines.reduce((s, l) => s + l.qty, 0)))} articles`} />
+        <Stat k="Argent reçu" v={money(sum(live, (d) => d.paid))} />
+        <Stat k="Reste à encaisser" v={money(sum(live, (d) => Math.max(0, d.total - d.paid)))} accent={live.some((d) => d.total - d.paid > 0.009)} />
+      </div>
+
+      {!data && <div className="spinner">Chargement…</div>}
+      {data && !shown.length && <div className="card"><div className="empty">Aucune vente pour cette période{qs || state !== 'all' || seller ? ' avec ces filtres' : ''}.</div></div>}
+      {days.map((g) => {
+        const gl = g.list.filter((d) => d.status !== 'annule');
+        return (
+          <div key={g.k} className="hist-day">
+            <div className="hist-day-head"><b>{dayTitle(g.k)}</b><span className="muted small">{gl.length} vente{gl.length > 1 ? 's' : ''}{g.list.length > gl.length ? ` · ${g.list.length - gl.length} annulée(s)` : ''}</span><b className="hist-day-total">{money(sum(gl, (d) => d.total))}</b></div>
+            <div className="card">
+              {g.list.map((d) => {
+                const [lab, col] = saleState(d); const isOpen = open[d.id];
+                const fixable = canFix({ ...d, type: 'facture' }) && d.parent_type !== 'commande';
+                return (
+                  <div key={d.id} className={'hist-sale' + (d.status === 'annule' ? ' cancelled' : '') + (isOpen ? ' open' : '')}>
+                    <div className="hist-main" onClick={() => setOpen({ ...open, [d.id]: !isOpen })}>
+                      <div className="hist-when"><b>{String(d.created_at).length && iso(new Date(d.created_at)) === String(d.date).slice(0, 10) ? hour(d.created_at) : date(d.date)}</b><span className="muted small">{d.number}</span></div>
+                      <div className="hist-what">
+                        <div className="hist-who"><b>{d.customer_name || 'Client comptoir'}</b>{d.user_name && <span className="muted small"> · vendu par {d.user_name}</span>}
+                          {d.channel && d.channel !== 'comptoir' && <span className="badge gray" style={{ marginLeft: 6 }}>{LABELS.channel?.[d.channel] || d.channel}</span>}
+                          {d.corrected && <span className="badge amber" style={{ marginLeft: 6 }}>✏️ corrigée</span>}</div>
+                        <div className="hist-items">{d.lines.map((l, i) => <span key={i} className="hist-item"><b>{num(l.qty)}</b> × {shortName(l.name)}</span>)}</div>
+                      </div>
+                      <div className="hist-amount"><b>{money(d.total)}</b><span className={'badge ' + col}>{lab}</span></div>
+                    </div>
+                    {isOpen && (
+                      <div className="hist-detail">
+                        <div className="table-wrap"><table className="t"><thead><tr><th>Produit</th><th className="r">Quantité</th><th className="r">Prix</th><th className="r">Total</th></tr></thead>
+                          <tbody>{d.lines.map((l, i) => <tr key={i}><td className="nm">{l.name}</td><td className="r nw">{num(l.qty)} {l.unit || ''}</td><td className="r nw">{money(l.unit_price)}</td><td className="r nw strong">{money(l.total)}</td></tr>)}</tbody>
+                          <tfoot>{d.discount > 0 && <tr><td colSpan={3}>Remise</td><td className="r">− {money(d.discount)}</td></tr>}<tr><td colSpan={3} className="strong">Total</td><td className="r strong">{money(d.total)}</td></tr></tfoot>
+                        </table></div>
+                        <div className="hist-pays">
+                          <span className="muted small">Paiements :</span>
+                          {d.payments.length ? d.payments.map((p, i) => <span key={i} className="badge green">{money(p.amount)} · {p.account_name || p.method || 'caisse'} · {date(p.date)}</span>) : <span className="muted small">aucun</span>}
+                          {d.total - d.paid > 0.009 && d.status !== 'annule' && <span className="badge red">Reste {money(d.total - d.paid)}</span>}
+                          {d.status !== 'annule' && d.cost > 0 && <span className="muted small">· bénéfice ≈ {money(d.total - d.cost)}</span>}
+                        </div>
+                        {d.notes && <div className="muted small" style={{ marginTop: 6 }}>Note : {d.notes}</div>}
+                      </div>
+                    )}
+                    {d.status !== 'annule' && (
+                      <div className="hist-actions">
+                        {fixable && <button className="btn sm" onClick={() => setModal({ kind: 'fix', d })}>✏️ Corriger</button>}
+                        {d.total - d.paid > 0.009 && <button className="btn sm accent" onClick={() => setModal({ kind: 'pay', d })}>💰 Encaisser</button>}
+                        <a className="btn sm" href={`/print/sales_docs/${d.id}`} target="_blank" rel="noreferrer">🧾 Reçu</a>
+                        <button className="btn sm ghost" onClick={() => setOpen({ ...open, [d.id]: !isOpen })}>{isOpen ? 'Masquer' : 'Détails'}</button>
+                        <div className="grow" />
+                        {d.channel !== 'depot' && <button className="btn sm danger" onClick={() => cancelSale(d)}>Annuler la vente</button>}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })}
+
+      {modal?.kind === 'fix' && <SaleEdit id={modal.d.id} onClose={after} />}
+      {modal?.kind === 'pay' && (
+        <ActionModal title={`Encaisser ${modal.d.number}`} initial={{ amount: Math.round((modal.d.total - modal.d.paid) * 100) / 100, date: today(), account_id: modal.d.payments[0]?.account_id || accounts[0]?.id }}
+          fields={[{ k: 'amount', l: 'Montant', t: 'number', req: true }, accountField, { k: 'date', l: "Date d'encaissement", t: 'date' }, { k: 'reference', l: 'Référence (n° transaction…)', t: 'text' }]}
+          onSubmit={(v) => op('sale_pay', { ...v, id: modal.d.id })} onClose={after}>
+          <div className="note" style={{ marginBottom: 12 }}>{modal.d.customer_name || 'Client comptoir'} · reste à payer : <b>{money(modal.d.total - modal.d.paid)}</b></div>
+        </ActionModal>
+      )}
+    </div>
   );
 }

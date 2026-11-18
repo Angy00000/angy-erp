@@ -307,6 +307,32 @@ export default handler(async (req, res, user) => {
     return list;
   }
 
+  // Historique des ventes : chaque vente avec ses produits, ses paiements et qui l'a faite
+  if (action === 'sales_history') {
+    if (!c('ventes') && !c('caisse')) fail('Accès refusé', 403);
+    const iso = (v, d) => (/^\d{4}-\d{2}-\d{2}$/.test(String(v || '')) ? v : d);
+    const from = iso(req.query.from, '2000-01-01'); const to = iso(req.query.to, '2999-12-31');
+    const list = await q(`SELECT d.id, d.number, d.date, d.status, d.channel, d.parent_id, d.created_at, d.customer_id, d.notes,
+        d.subtotal::float8 AS subtotal, d.discount::float8 AS discount, d.total::float8 AS total, d.paid::float8 AS paid, d.cost::float8 AS cost,
+        c.name AS customer_name, c.phone AS customer_phone, u.name AS user_name, d.user_id, pd.type AS parent_type
+      FROM sales_docs d LEFT JOIN customers c ON c.id=d.customer_id LEFT JOIN users u ON u.id=d.user_id LEFT JOIN sales_docs pd ON pd.id=d.parent_id
+      WHERE d.company_id=$1 AND d.type='facture' AND d.status NOT IN ('brouillon','transforme') AND d.date BETWEEN $2 AND $3
+      ORDER BY d.date DESC, d.created_at DESC, d.id DESC LIMIT 1000`, [cid, from, to]);
+    const ids = list.map((x) => x.id);
+    const lines = ids.length ? await q(`SELECT sl.doc_id, sl.item_id, sl.qty::float8 AS qty, sl.unit_price::float8 AS unit_price, sl.total::float8 AS total, i.name, i.unit
+      FROM sales_lines sl LEFT JOIN items i ON i.id=sl.item_id WHERE sl.doc_id = ANY($1::int[]) ORDER BY sl.id`, [ids]) : [];
+    const pays = ids.length ? await q(`SELECT p.doc_id, p.account_id, p.amount::float8 AS amount, p.date, p.method, a.name AS account_name FROM payments p LEFT JOIN accounts a ON a.id=p.account_id
+      WHERE p.doc_type='sales_docs' AND p.direction='in' AND p.doc_id = ANY($1::int[]) ORDER BY p.date, p.id`, [ids]) : [];
+    const corr = ids.length ? await q(`SELECT DISTINCT ref_id FROM stock_movements WHERE company_id=$1 AND ref_type='sales_docs_corrige' AND ref_id = ANY($2::int[])`, [cid, ids]) : [];
+    const fixed = new Set(corr.map((x) => x.ref_id));
+    for (const d of list) {
+      d.lines = lines.filter((l) => l.doc_id === d.id);
+      d.payments = pays.filter((p) => p.doc_id === d.id);
+      d.corrected = fixed.has(d.id);
+    }
+    return list;
+  }
+
   // Le Gardien : alertes sur les actions sensibles (direction uniquement)
   if (action === 'guardian') {
     if (!c('gardien')) fail('Accès refusé pour votre rôle', 403);
