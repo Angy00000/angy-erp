@@ -104,6 +104,7 @@ export default handler(async (req, res, user) => {
 
   // Résumé de la journée, prêt à envoyer sur WhatsApp
   if (action === 'daily') {
+    if (!c('argent')) fail("Accès refusé : votre rôle ne voit pas l'argent", 403);
     const day = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.date || '')) ? req.query.date : new Date().toISOString().slice(0, 10);
     const co = await one('SELECT name FROM companies WHERE id=$1', [cid]);
     const F = (v) => `${Math.round(Number(v) || 0).toLocaleString('fr-FR').replace(/\u202f|\u00a0/g, ' ')} F`;
@@ -174,7 +175,7 @@ export default handler(async (req, res, user) => {
 
   // Clients qui doivent de l'argent (factures validées non soldées)
   if (action === 'debts') {
-    if (!c('ventes')) fail('Accès refusé', 403);
+    if (!c('ventes') || !c('argent')) fail('Accès refusé', 403);
     const rows = await q(`SELECT cu.id, cu.name, cu.phone, cu.type, COUNT(d.id) AS invoices, SUM(d.total-d.paid) AS due, MIN(d.date) AS oldest,
         (current_date - MIN(d.date)) AS days, MAX(d.date) AS last_date
       FROM sales_docs d JOIN customers cu ON cu.id=d.customer_id
@@ -198,7 +199,12 @@ export default handler(async (req, res, user) => {
     for (const o of open) { o.lines = lines.filter((l) => l.consignment_id === o.id); o.value = o.lines.reduce((s, l) => s + n(l.qty_out) * n(l.unit_price), 0); }
     const debts = await q(`SELECT cu.id, cu.name, cu.phone, SUM(d.total-d.paid) AS due FROM sales_docs d JOIN customers cu ON cu.id=d.customer_id
       WHERE d.company_id=$1 AND d.type='facture' AND d.channel='depot' AND d.status IN ('valide','partiel') GROUP BY cu.id HAVING SUM(d.total-d.paid)>0.5 ORDER BY 4 DESC`, [cid]);
-    return { open, done, debts };
+    if (!c('argent')) {
+      // Pas de montants pour un rôle qui ne voit pas l'argent (magasinier…) : seulement les quantités
+      for (const o of open) { o.value = null; o.lines = o.lines.map((l) => ({ ...l, unit_price: null })); }
+      return { open, done: done.map((x) => ({ ...x, total: null, paid: null })), debts: [], money: false };
+    }
+    return { open, done, debts, money: true };
   }
 
   if (action === 'orders') {
@@ -215,7 +221,7 @@ export default handler(async (req, res, user) => {
         out.push({ level: late || !o.ready ? 'red' : 'orange', mod: 'ventes', title: late ? 'Commande en retard' : o.days === 0 ? 'Commande à livrer aujourd\'hui' : `Commande à livrer dans ${o.days} j`,
           text: `${o.number} — ${o.customer_name || 'client'}${o.ready ? ' · prête' : ' · stock insuffisant, à produire'}` });
       }
-      if (c('ventes')) {
+      if (c('ventes') && c('argent')) {
         const old = await one(`SELECT COUNT(DISTINCT customer_id) AS n, COALESCE(SUM(total-paid),0) AS due FROM sales_docs WHERE company_id=$1 AND type='facture' AND status IN ('valide','partiel') AND total-paid>0.5 AND date < current_date - 30`, [cid]);
         if (Number(old.n) > 0) out.push({ level: 'orange', mod: 'ventes', title: 'Dettes de plus de 30 jours', text: `${old.n} client(s) doivent ${Math.round(old.due).toLocaleString('fr-FR')} F — Ventes & Clients → Dettes clients` });
       }
@@ -242,7 +248,7 @@ export default handler(async (req, res, user) => {
       const ql = await one("SELECT COUNT(*) c FROM lots WHERE company_id=$1 AND status='quarantaine' AND qty>0", [cid]);
       if (n(ql.c)) out.push({ level: 'orange', mod: 'qualite', title: 'Lots en quarantaine', text: `${ql.c} lot(s) attendent une libération` });
     }
-    if (c('ventes')) {
+    if (c('ventes') && c('argent')) {
       const due = await one(`SELECT COUNT(*) c, COALESCE(SUM(total-paid),0) s FROM sales_docs WHERE company_id=$1 AND type='facture' AND status IN ('valide','partiel') AND due_date < current_date`, [cid]);
       if (n(due.c)) out.push({ level: 'red', mod: 'ventes', title: 'Factures en retard', text: `${due.c} facture(s) échue(s) · ${Math.round(n(due.s)).toLocaleString('fr-FR')} F à encaisser` });
     }
@@ -317,7 +323,9 @@ export default handler(async (req, res, user) => {
         c.name AS customer_name, c.phone AS customer_phone, u.name AS user_name, d.user_id, pd.type AS parent_type
       FROM sales_docs d LEFT JOIN customers c ON c.id=d.customer_id LEFT JOIN users u ON u.id=d.user_id LEFT JOIN sales_docs pd ON pd.id=d.parent_id
       WHERE d.company_id=$1 AND d.type='facture' AND d.status NOT IN ('brouillon','transforme') AND d.date BETWEEN $2 AND $3
-      ORDER BY d.date DESC, d.created_at DESC, d.id DESC LIMIT 1000`, [cid, from, to]);
+        AND ($4::int IS NULL OR d.user_id=$4)
+      ORDER BY d.date DESC, d.created_at DESC, d.id DESC LIMIT 1000`, [cid, from, to, c('argent') ? null : user.uid]);
+    if (!c('argent')) for (const d of list) d.cost = null;
     const ids = list.map((x) => x.id);
     const lines = ids.length ? await q(`SELECT sl.doc_id, sl.item_id, sl.qty::float8 AS qty, sl.unit_price::float8 AS unit_price, sl.total::float8 AS total, i.name, i.unit
       FROM sales_lines sl LEFT JOIN items i ON i.id=sl.item_id WHERE sl.doc_id = ANY($1::int[]) ORDER BY sl.id`, [ids]) : [];

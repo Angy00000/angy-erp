@@ -10,6 +10,7 @@ export default function Depots({ canMoney = true }) {
   const [modal, setModal] = useState(null);
   if (!data) return <div className="spinner">Chargement…</div>;
   const { open, done, debts } = data;
+  const showMoney = data.money !== false;
   const refresh = () => { invalidateRefs('items'); invalidateRefs('lots'); invalidateRefs('accounts'); reload(); };
   const outValue = open.reduce((s, o) => s + o.value, 0);
   const debtTotal = debts.reduce((s, x) => s + Number(x.due), 0);
@@ -20,9 +21,9 @@ export default function Depots({ canMoney = true }) {
         <div className="grow" />
         <button className="btn primary" onClick={() => setModal({ k: 'out' })}>+ Confier des produits</button>
       </div>
-      <div className="grid g3" style={{ marginBottom: 16 }}>
-        <Stat k="Chez les vendeurs" v={money(outValue)} s={`${open.length} dépôt(s) en cours`} />
-        <Stat k="Argent attendu des vendeurs" v={money(debtTotal)} s={debts.length ? `${debts.length} vendeur(s) doivent encore` : 'personne ne doit rien'} accent={debtTotal > 0} />
+      <div className={'grid ' + (showMoney ? 'g3' : 'g2')} style={{ marginBottom: 16 }}>
+        <Stat k="Chez les vendeurs" v={showMoney ? money(outValue) : `${num(open.reduce((s, o) => s + o.lines.reduce((a, l) => a + Number(l.qty_out), 0), 0))} articles`} s={`${open.length} dépôt(s) en cours`} />
+        {showMoney && <Stat k="Argent attendu des vendeurs" v={money(debtTotal)} s={debts.length ? `${debts.length} vendeur(s) doivent encore` : 'personne ne doit rien'} accent={debtTotal > 0} />}
         <Stat k="Réglés récemment" v={num(done.length)} s="voir l'historique plus bas" />
       </div>
 
@@ -34,10 +35,10 @@ export default function Depots({ canMoney = true }) {
             <span className="muted small">{o.number} · {date(o.date)}{o.days > 0 ? ` (il y a ${o.days} j)` : ''}</span>
           </div>
           <table className="t order-l"><tbody>{o.lines.map((l) => (
-            <tr key={l.id}><td>{l.name}</td><td className="r">{num(l.qty_out)} {l.unit}</td><td className="r small muted">{money(l.unit_price)}</td><td className="r mono">{money(l.qty_out * l.unit_price)}</td></tr>
+            <tr key={l.id}><td>{l.name}</td><td className="r">{num(l.qty_out)} {l.unit}</td>{showMoney && <><td className="r small muted">{money(l.unit_price)}</td><td className="r mono">{money(l.qty_out * l.unit_price)}</td></>}</tr>
           ))}</tbody></table>
           <div className="row" style={{ justifyContent: 'space-between', marginTop: 10 }}>
-            <span><span className="muted small">Valeur confiée </span><b>{money(o.value)}</b></span>
+            <span>{showMoney && <><span className="muted small">Valeur confiée </span><b>{money(o.value)}</b></>}</span>
             <span className="row">
               <button className="btn sm danger" onClick={() => confirmDo(`Annuler le dépôt ${o.number} ? Tous les produits reviennent en stock.`) && op('consign_cancel', { id: o.id }).then(() => { toast('Dépôt annulé, produits remis en stock'); refresh(); }).catch((e) => toast(e.message, 'error'))}>Annuler</button>
               <button className="btn sm primary" onClick={() => setModal({ k: 'settle', o })}>{canMoney ? 'Retour & argent' : 'Retour du soir'}</button>
@@ -63,23 +64,23 @@ export default function Depots({ canMoney = true }) {
       <div className="card" style={{ marginTop: 16 }}>
         <div className="card-pad" style={{ paddingBottom: 0 }}><h3 style={{ margin: 0 }}>Historique des dépôts réglés</h3></div>
         <div className="table-wrap"><table className="t">
-          <thead><tr><th>Dépôt</th><th>Vendeur</th><th>Confié le</th><th>Réglé le</th><th className="r">Vendu</th><th className="r">Payé</th><th className="r">Reste</th><th className="r">Retours / pertes</th><th /></tr></thead>
+          <thead><tr><th>Dépôt</th><th>Vendeur</th><th>Confié le</th><th>Réglé le</th>{showMoney && <><th className="r">Vendu</th><th className="r">Payé</th><th className="r">Reste</th></>}<th className="r">Retours / pertes</th><th /></tr></thead>
           <tbody>{done.map((x) => (
             <tr key={x.id}><td className="strong">{x.number}</td><td>{x.seller}</td><td>{date(x.date)}</td><td className="small">{datetime(x.settled_at)}</td>
-              <td className="r">{money(x.total)}</td><td className="r">{money(x.paid)}</td><td className={'r' + (x.total - x.paid > 0.5 ? ' neg strong' : '')}>{money(x.total - x.paid)}</td>
+              {showMoney && <><td className="r">{money(x.total)}</td><td className="r">{money(x.paid)}</td><td className={'r' + (x.total - x.paid > 0.5 ? ' neg strong' : '')}>{money(x.total - x.paid)}</td></>}
               <td className="r small">{num(x.returned)} / {num(x.lost)}</td>
-              <td className="actions">{x.sale_id && <a className="btn sm" href={`/print/sales_docs/${x.sale_id}`} target="_blank" rel="noreferrer">Facture</a>}</td></tr>
+              <td className="actions">{showMoney && x.sale_id && <a className="btn sm" href={`/print/sales_docs/${x.sale_id}`} target="_blank" rel="noreferrer">Facture</a>}</td></tr>
           ))}</tbody>
         </table>{!done.length && <div className="empty">Aucun dépôt réglé pour le moment.</div>}</div>
       </div>
 
-      {modal?.k === 'out' && <ConsignOut onClose={(ok) => { setModal(null); if (ok) refresh(); }} />}
-      {modal?.k === 'settle' && <Settle o={modal.o} canMoney={canMoney} onClose={(ok) => { setModal(null); if (ok) refresh(); }} />}
+      {modal?.k === 'out' && <ConsignOut showMoney={showMoney} onClose={(ok) => { setModal(null); if (ok) refresh(); }} />}
+      {modal?.k === 'settle' && <Settle o={modal.o} canMoney={canMoney && showMoney} onClose={(ok) => { setModal(null); if (ok) refresh(); }} />}
     </div>
   );
 }
 
-function ConsignOut({ onClose }) {
+function ConsignOut({ onClose, showMoney = true }) {
   const customers = useRefOptions('customers', {});
   const products = useRefOptions('items', { active: true }).filter((i) => i.type === 'pf' || (i.type !== 'service' && Number(i.sale_price) > 0));
   const sellers = [...customers].sort((a, b) => (['vendeur', 'revendeur'].includes(b.type) ? 1 : 0) - (['vendeur', 'revendeur'].includes(a.type) ? 1 : 0));
@@ -114,13 +115,13 @@ function ConsignOut({ onClose }) {
           <div className="field"><label>Nom du vendeur <button type="button" className="link-btn" onClick={() => setIsNew(false)}>choisir dans la liste</button></label><input className="input" value={d.name || ''} onChange={(e) => setD({ ...d, name: e.target.value })} /></div>
           <div className="field"><label>Téléphone</label><input className="input" value={d.phone || ''} onChange={(e) => setD({ ...d, phone: e.target.value })} /></div>
         </>)}
-        <div className="field"><label>Prix appliqué</label><select className="input" value={d.tier} onChange={(e) => { const tier = e.target.value; setD({ ...d, tier }); setRows((r) => r.map((x) => { const p = products.find((y) => y.id === x.item_id); return p ? { ...x, unit_price: tier === 'gros' && Number(p.wholesale_price) > 0 ? p.wholesale_price : p.sale_price } : x; })); }}>
-          <option value="detail">Prix de détail</option><option value="gros">Prix de gros (revendeur)</option></select></div>
+        {showMoney && <div className="field"><label>Prix appliqué</label><select className="input" value={d.tier} onChange={(e) => { const tier = e.target.value; setD({ ...d, tier }); setRows((r) => r.map((x) => { const p = products.find((y) => y.id === x.item_id); return p ? { ...x, unit_price: tier === 'gros' && Number(p.wholesale_price) > 0 ? p.wholesale_price : p.sale_price } : x; })); }}>
+          <option value="detail">Prix de détail</option><option value="gros">Prix de gros (revendeur)</option></select></div>}
         <div className="field"><label>Date</label><input type="date" className="input" value={d.date} onChange={(e) => setD({ ...d, date: e.target.value })} /></div>
       </div>
       <h3 style={{ fontSize: 14, margin: '16px 0 8px' }}>Produits confiés</h3>
       <div className="table-wrap"><table className="lines">
-        <thead><tr><th style={{ minWidth: 240 }}>Produit</th><th>En stock</th><th style={{ width: 120 }}>Quantité</th><th style={{ width: 130 }}>Prix unitaire</th><th className="r">Valeur</th><th /></tr></thead>
+        <thead><tr><th style={{ minWidth: 240 }}>Produit</th><th>En stock</th><th style={{ width: 120 }}>Quantité</th>{showMoney && <><th style={{ width: 130 }}>Prix unitaire</th><th className="r">Valeur</th></>}<th /></tr></thead>
         <tbody>{rows.map((r, i) => {
           const p = products.find((x) => x.id === r.item_id);
           const short = p && Number(r.qty) > Number(p.stock);
@@ -130,13 +131,13 @@ function ConsignOut({ onClose }) {
                 <option value="">— Choisir —</option>{products.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</select></td>
               <td className={'small ' + (p && Number(p.stock) <= 0 ? 'neg' : 'muted')}>{p ? `${num(p.stock)} ${p.unit || ''}` : ''}</td>
               <td><input type="number" step="any" className="input" value={r.qty || ''} onChange={(e) => setRow(i, { qty: e.target.value })} disabled={!p} />{short && <div className="neg small strong">Stock insuffisant</div>}</td>
-              <td><input type="number" step="any" className="input" value={r.unit_price ?? ''} onChange={(e) => setRow(i, { unit_price: e.target.value })} disabled={!p} /></td>
-              <td className="r mono">{Number(r.qty) > 0 ? money(Number(r.qty) * Number(r.unit_price || 0)) : ''}</td>
+              {showMoney && <><td><input type="number" step="any" className="input" value={r.unit_price ?? ''} onChange={(e) => setRow(i, { unit_price: e.target.value })} disabled={!p} /></td>
+              <td className="r mono">{Number(r.qty) > 0 ? money(Number(r.qty) * Number(r.unit_price || 0)) : ''}</td></>}
               <td>{rows.length > 1 && <button className="btn sm ghost" onClick={() => setRows(rows.filter((_, j) => j !== i))}>✕</button>}</td>
             </tr>
           );
         })}</tbody>
-        {total > 0 && <tfoot><tr><td colSpan={4} className="strong">Valeur confiée</td><td className="r mono strong">{money(total)}</td><td /></tr></tfoot>}
+        {total > 0 && showMoney && <tfoot><tr><td colSpan={4} className="strong">Valeur confiée</td><td className="r mono strong">{money(total)}</td><td /></tr></tfoot>}
       </table></div>
       <button className="btn sm" style={{ marginTop: 8 }} onClick={() => setRows([...rows, {}])}>+ Ajouter un produit</button>
     </Modal>

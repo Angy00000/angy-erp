@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react';
-import { crud, exportCSV, money, num, monthStart, today } from '../lib/client';
+import { crud, exportCSV, money, num, monthStart, today, ACCESS, moneyCol } from '../lib/client';
 import { useData, Modal, Form, Cell, run, toast, invalidateRefs, RefSelect, confirmDo, useRefOptions } from './ui';
 
 // Classes de colonnes : chiffres à droite sans retour à la ligne, dates/n°/statuts sur une ligne, noms jamais écrasés
@@ -13,11 +13,15 @@ function colClass(c) {
   return '';
 }
 
+const MONEY_SUM = ['cost_price', 'unit_cost', 'revenue', 'balance', 'cost', 'total_cost', 'margin'];
+
 export default function CrudTable({
   entity, title, columns, fields, defaults, filters = [], dateRange, params: fixedParams, rowActions, toolbar,
   canEdit = () => true, canDelete = () => true, canCreate = true, lines, csvName, sums = [], onSaved, newLabel, empty,
   initialRange,
 }) {
+  // Rôle qui ne voit pas l'argent : on enlève les colonnes de coûts, soldes et valeurs
+  if (!ACCESS.money) { columns = columns.filter((c) => !moneyCol(c)); sums = sums.filter((k) => !MONEY_SUM.includes(k)); }
   const [search, setSearch] = useState('');
   const [f, setF] = useState({});
   const [range, setRange] = useState(dateRange ? initialRange || { from: monthStart(), to: today() } : {});

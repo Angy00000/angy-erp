@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/router';
-import { api, setCurrency } from '../../lib/client';
+import { api, setCurrency, ACCESS } from '../../lib/client';
 import { MODULES, ROLES, can as canRole } from '../../lib/perms';
 import Dashboard, { Ic } from '../../components/modules/Dashboard';
 import Ventes from '../../components/modules/Ventes';
@@ -58,7 +58,8 @@ export default function AppShell() {
 
   const role = me.user.role;
   const can = (m) => canRole({ role, modules: me.user.modules }, m);
-  const visible = MODULES.filter((m) => can(m.key) || (m.key === 'rapports' && ['ventes', 'stock', 'production', 'caisse', 'qualite'].some(can)));
+  ACCESS.money = can('argent');
+  const visible = MODULES.filter((m) => m.nav !== false && (can(m.key) || (m.key === 'rapports' && ACCESS.money && ['ventes', 'stock', 'production', 'caisse', 'qualite'].some(can))));
   const current = visible.find((m) => m.key === mod) ? mod : 'dashboard';
   const View = VIEWS[current];
   const go = (m) => { router.push('/app/' + m); setOpen(false); };

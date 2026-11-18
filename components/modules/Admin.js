@@ -101,6 +101,7 @@ const MOD_HELP = {
   rh: 'Employés, présences, paie',
   rapports: 'Chiffres et bilans',
   gardien: 'Alertes de surveillance',
+  argent: "Soldes des comptes, chiffre d'affaires, bénéfices, coûts, valeur du stock. Sans cette case : ne voit que ses propres ventes",
 };
 function Roles() {
   const { data, reload } = useData(() => api('app/roles'), []);

@@ -6,6 +6,18 @@ import { ENTITIES } from '../../../../lib/entities';
 import { q, one, tx } from '../../../../lib/db';
 import { cashTx } from '../../../../lib/stock';
 
+// Sans le droit « Voir l'argent » : pas de soldes, de coûts ni de valeurs ; seulement ses propres ventes et encaissements
+const MONEY_ONLY = new Set(['cash_transactions', 'expenses']);
+const OWN_ONLY = { sales_docs: 'user_id', payments: 'user_id' };
+const MONEY_KEYS = ['balance', 'initial_balance', 'cost_price', 'unit_cost', 'cost', 'total_cost', 'stock_value', 'margin', 'cost_value', 'avg_cost', 'revenue'];
+function hideMoney(row) {
+  if (!row || typeof row !== 'object') return row;
+  const o = { ...row };
+  for (const k of MONEY_KEYS) if (k in o) o[k] = null;
+  if (Array.isArray(o.lines)) o.lines = o.lines.map(hideMoney);
+  return o;
+}
+
 // Le rôle donné à un utilisateur doit exister (rôle par défaut ou créé par l'entreprise)
 async function checkRole(t, cid, role) {
   if (ROLES[role]) return;
@@ -65,11 +77,14 @@ export default handler(async (req, res, user) => {
   if (!canRead) fail('Accès refusé pour votre rôle', 403);
   const cid = user.cid;
 
+  const noMoney = !can(user, 'argent');
+  if (noMoney && MONEY_ONLY.has(entity)) fail("Accès refusé : votre rôle ne voit pas l'argent", 403);
   if (req.method === 'GET') {
     if (id) {
       const row = await fetchOne(cfg, id, cid);
       if (!row) fail('Introuvable', 404);
-      return row;
+      if (noMoney && OWN_ONLY[entity] && row[OWN_ONLY[entity]] !== user.uid) fail('Accès refusé', 403);
+      return noMoney ? hideMoney(row) : row;
     }
     const { alias, sql } = baseSelect(cfg);
     const params = [cid];
@@ -94,7 +109,9 @@ export default handler(async (req, res, user) => {
     if (cfg.dateCol && qs.to) { params.push(qs.to); where.push(`${cfg.dateCol}<=$${params.length}`); }
     for (const [k, cond] of Object.entries(cfg.extraWhere || {})) if (qs[k]) where.push(cond);
     const limit = Math.min(parseInt(qs.limit || '1000', 10) || 1000, 5000);
-    return q(`${sql} WHERE ${where.join(' AND ')} ORDER BY ${cfg.order || alias + '.id DESC'} LIMIT ${limit}`, params);
+    if (noMoney && OWN_ONLY[entity]) { params.push(user.uid); where.push(`${alias}.${OWN_ONLY[entity]}=$${params.length}`); }
+    const rows = await q(`${sql} WHERE ${where.join(' AND ')} ORDER BY ${cfg.order || alias + '.id DESC'} LIMIT ${limit}`, params);
+    return noMoney ? rows.map(hideMoney) : rows;
   }
 
   if (!canWrite) fail('Lecture seule pour votre rôle', 403);

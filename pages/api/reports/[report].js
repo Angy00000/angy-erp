@@ -84,7 +84,7 @@ const REPORTS = {
       out.top = await q(`SELECT i.name, i.unit, i.unit_volume, SUM(sl.qty) AS qty, SUM(sl.total) AS total FROM sales_lines sl
         JOIN sales_docs d ON d.id=sl.doc_id JOIN items i ON i.id=sl.item_id
         WHERE d.company_id=$1 AND ${SALES_OK} AND d.date>=$2 GROUP BY i.name, i.unit, i.unit_volume ORDER BY total DESC LIMIT 40`, [cid, m]);
-      out.recent = await q(`SELECT d.id, d.number, d.date, d.created_at, d.total, d.paid, d.status, c.name AS customer_name, u.name AS user_name,
+      out.recent = await q(`SELECT d.id, d.number, d.date, d.created_at, d.total, d.paid, d.status, d.user_id, c.name AS customer_name, u.name AS user_name,
         (SELECT string_agg(trim(to_char(sl.qty,'FM999990.###'))||' × '||i.name, ', ' ORDER BY sl.id) FROM sales_lines sl JOIN items i ON i.id=sl.item_id WHERE sl.doc_id=d.id) AS items
         FROM sales_docs d LEFT JOIN customers c ON c.id=d.customer_id LEFT JOIN users u ON u.id=d.user_id
         WHERE d.company_id=$1 AND ${SALES_OK} ORDER BY d.date DESC, d.created_at DESC LIMIT 6`, [cid]);
@@ -139,6 +139,16 @@ const REPORTS = {
     if (show('achats')) {
       out.payables = (await one(`SELECT COALESCE(SUM(pl.received_qty*pl.unit_price),0) - COALESCE((SELECT SUM(amount) FROM payments WHERE company_id=$1 AND party_type='supplier'),0) AS s
         FROM purchase_lines pl JOIN purchase_orders po ON po.id=pl.po_id WHERE po.company_id=$1 AND po.status<>'annule'`, [cid])).s;
+    }
+    // Rôle sans « Voir l'argent » (vendeur, magasinier…) : on retire tous les montants de l'entreprise
+    out.money = can(user, 'argent');
+    if (!out.money) {
+      for (const k of ['cash', 'month_expenses', 'payables', 'stock', 'stock_types', 'month_prod', 'daily']) delete out[k];
+      if (out.sales) out.sales = { today_count: out.sales.today_count, today_items: out.sales.today_items, week_count: out.sales.week_count, month_count: out.sales.month_count };
+      if (out.top) out.top = out.top.map(({ total, ...x }) => x);
+      if (out.recent) out.recent = out.recent.filter((r) => r.user_id === user.uid);
+      if (out.pf_stock) out.pf_stock = out.pf_stock.map(({ sale_price, cost_value, ...x }) => x);
+      if (out.prod_month) delete out.prod_month.cost;
     }
     return out;
   }],
@@ -306,10 +316,13 @@ const REPORTS = {
   }],
 };
 
+const MONEY_REPORTS = new Set(['pnl', 'sales', 'by_product', 'stock', 'balances', 'cash', 'profitability', 'prod_detail']);
+
 export default handler(async (req, res, user) => {
   const r = REPORTS[req.query.report];
   if (!r) fail('Rapport inconnu', 404);
   const [mods, fn] = r;
+  if (MONEY_REPORTS.has(req.query.report) && !can(user, 'argent')) fail("Accès refusé : votre rôle ne voit pas l'argent", 403);
   if (mods) {
     const list = Array.isArray(mods) ? mods : [mods];
     if (!list.some((m) => can(user, m))) fail('Accès refusé pour votre rôle', 403);

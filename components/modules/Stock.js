@@ -1,6 +1,6 @@
 import Depots from './Depots';
 import { useState } from 'react';
-import { api, op, money, num, opts, today, daysUntil, date as fdate, LABELS } from '../../lib/client';
+import { api, op, money, num, opts, today, daysUntil, date as fdate, LABELS, ACCESS } from '../../lib/client';
 import { Tabs, Badge, invalidateRefs, Modal, useRefOptions, RefSelect, toast, useData, confirmDo } from '../ui';
 import CrudTable from '../CrudTable';
 import ActionModal from '../ActionModal';
@@ -18,7 +18,7 @@ export default function Stock({ can }) {
     <div>
       <Tabs value={tab} onChange={setTab} tabs={[['items', 'Articles & niveaux'], ['vendeurs', '🚚 Sorties vendeurs'], ['achats', '🛒 Achats'], ['lots', 'Lots'], ['moves', 'Mouvements'], ['cats', 'Catégories'], ['wh', 'Entrepôts']]} />
       {tab === 'items' && <Items />}
-      {tab === 'vendeurs' && <Depots canMoney={!can || can('ventes') || can('caisse')} />}
+      {tab === 'vendeurs' && <Depots canMoney={ACCESS.money && (!can || can('ventes') || can('caisse'))} />}
       {tab === 'achats' && <PurchaseHistory />}
       {tab === 'lots' && <Lots />}
       {tab === 'moves' && <Moves />}
@@ -76,7 +76,7 @@ function JuiceSummary({ items }) {
           <span className="jn">{g.name}</span>
           <b>{g.liters > 0 ? `${num(g.liters)} L` : 'Épuisé'}</b>
           <small>{g.parts.length ? g.parts.join(' · ') : 'à produire'}</small>
-          {g.value > 0 && <small className="jv">vaut {money(g.value)}</small>}
+          {g.value > 0 && ACCESS.money && <small className="jv">vaut {money(g.value)}</small>}
         </div>
       ))}
     </div>
@@ -98,12 +98,12 @@ function Items() {
     stockCol, stateCol,
     { k: 'sale_price', l: 'Prix de vente', r: true, fmt: (r) => <span className="strong">{money(r.sale_price)}</span>, csv: (r) => r.sale_price },
     { k: 'cost_price', l: 'Coût de revient', r: true, fmt: (r) => (Number(r.cost_price) > 0 ? money(r.cost_price) : <span className="muted">après 1re production</span>), csv: (r) => r.cost_price },
-    { k: 'value', l: 'Vaut à la vente', r: true, fmt: (r) => money(r.stock * r.sale_price), csv: (r) => Math.round(r.stock * r.sale_price) },
+    { k: 'value', money: true, l: 'Vaut à la vente', r: true, fmt: (r) => money(r.stock * r.sale_price), csv: (r) => Math.round(r.stock * r.sale_price) },
   ] : [
     nameCol, stockCol, stateCol,
     { k: 'cost_price', l: 'Prix d\'achat moyen', r: true, fmt: (r) => (Number(r.cost_price) > 0 ? <>{money(r.cost_price)}<span className="muted small"> / {r.unit}</span></> : <span className="muted">—</span>), csv: (r) => r.cost_price },
     ...(type ? [] : [{ k: 'sale_price', l: 'Prix de vente', r: true, fmt: (r) => (SOLD.includes(r.type) ? money(r.sale_price) : <span className="muted">—</span>), csv: (r) => (SOLD.includes(r.type) ? r.sale_price : '') }]),
-    { k: 'value', l: 'Valeur du stock', r: true, fmt: (r) => money(r.stock * r.cost_price), csv: (r) => Math.round(r.stock * r.cost_price) },
+    { k: 'value', money: true, l: 'Valeur du stock', r: true, fmt: (r) => money(r.stock * r.cost_price), csv: (r) => Math.round(r.stock * r.cost_price) },
   ];
   return (
     <>

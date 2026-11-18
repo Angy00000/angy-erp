@@ -74,7 +74,19 @@ export default function Dashboard({ go, user, company, can }) {
       <Hero d={d} cashTotal={cashTotal} user={user} company={company} go={go} can={can} />
       {d.setup && <Setup s={d.setup} go={go} />}
 
-      {S && (<>
+      {S && d.money === false && (<>
+        <SecTitle t="Ventes" s="Nombre de ventes (ventes annulées non comptées)" />
+        <div className="kpis">
+          <Kpi ic="cart" tone="orange" k="Aujourd'hui" v={`${S.today_count} vente${S.today_count > 1 ? 's' : ''}`} s={`${num(S.today_items)} article(s)`} on={() => go('ventes')} />
+          <Kpi ic="trend" tone="blue" k="7 derniers jours" v={`${S.week_count} vente${S.week_count > 1 ? 's' : ''}`} s="toute l'équipe" on={() => go('ventes')} />
+          <Kpi ic="star" tone="green" k="Ce mois" v={`${S.month_count} vente${S.month_count > 1 ? 's' : ''}`} s="toute l'équipe" on={() => go('ventes')} />
+        </div>
+        <div className="dgrid">
+          {d.recent && <Recent list={d.recent} go={go} mine />}
+          {d.top && <TopByJuice top={d.top} />}
+        </div>
+      </>)}
+      {S && d.money !== false && (<>
         <SecTitle t="Ventes" s="Ce qui a été vendu (ventes annulées non comptées)" />
         <div className="kpis">
           <Kpi ic="cart" tone="orange" k="Aujourd'hui" v={money(S.today)} s={<>{S.today_count} vente{S.today_count > 1 ? 's' : ''} · {num(S.today_items)} article{S.today_items > 1 ? 's' : ''}<br />Hier : {money(S.yesterday)}</>} on={() => go('ventes')} />
@@ -170,10 +182,10 @@ function Treasury({ cash, total, go }) {
   );
 }
 
-function Recent({ list, go }) {
+function Recent({ list, go, mine }) {
   return (
     <div className="panel wide">
-      <PanelHead ic="receipt" t="Dernières ventes" a="Historique des ventes" on={() => go('ventes')} />
+      <PanelHead ic="receipt" t={mine ? 'Mes dernières ventes' : 'Dernières ventes'} a={mine ? 'Mes ventes' : 'Historique des ventes'} on={() => go('ventes')} />
       {!list.length && <Empty t="Aucune vente pour l'instant" />}
       {list.map((v) => {
         const due = Number(v.total) - Number(v.paid);
@@ -193,9 +205,11 @@ function Recent({ list, go }) {
 // Ventes du mois regroupées par jus (avec le détail par format)
 function TopByJuice({ top }) {
   const m = new Map();
-  for (const t of top) { const { fam, fmt } = famOf(t.name); if (!m.has(fam)) m.set(fam, { fam, total: 0, liters: 0, fmts: [] }); const g = m.get(fam); g.total += Number(t.total); g.liters += Number(t.qty) * (Number(t.unit_volume) || 0); g.fmts.push({ fmt: fmt || t.unit, qty: Number(t.qty), unit: t.unit }); }
-  const list = [...m.values()].sort((a, b) => b.total - a.total);
-  const max = list[0]?.total || 1;
+  const hasMoney = top.some((t) => t.total !== undefined);
+  for (const t of top) { const { fam, fmt } = famOf(t.name); if (!m.has(fam)) m.set(fam, { fam, total: 0, units: 0, liters: 0, fmts: [] }); const g = m.get(fam); g.total += Number(t.total) || 0; g.units += Number(t.qty); g.liters += Number(t.qty) * (Number(t.unit_volume) || 0); g.fmts.push({ fmt: fmt || t.unit, qty: Number(t.qty), unit: t.unit }); }
+  const key = hasMoney ? 'total' : (top.some((t) => Number(t.unit_volume) > 0) ? 'liters' : 'units');
+  const list = [...m.values()].sort((a, b) => b[key] - a[key]);
+  const max = list[0]?.[key] || 1;
   return (
     <div className="panel">
       <PanelHead ic="star" t="Ce qui se vend le mieux (ce mois)" />
@@ -203,8 +217,8 @@ function TopByJuice({ top }) {
       {list.slice(0, 7).map((g, i) => (
         <div key={g.fam} className="rank">
           <span className={'rank-n r' + i}>{i + 1}</span>
-          <div className="rank-b"><div className="rank-t"><span>{g.fam}</span><b className="mono">{money(g.total)}</b></div>
-            <div className="track"><div className="fill" style={{ width: `${(g.total / max) * 100}%` }} /></div>
+          <div className="rank-b"><div className="rank-t"><span>{g.fam}</span><b className="mono">{hasMoney ? money(g.total) : key === 'liters' ? `${num(Math.round(g.liters * 10) / 10)} L` : num(g.units)}</b></div>
+            <div className="track"><div className="fill" style={{ width: `${(g[key] / max) * 100}%` }} /></div>
             <span className="muted small">{g.fmts.map((f) => `${num(f.qty)} ${f.fmt}`).join(' · ')}{g.liters > 0 ? ` — ${num(Math.round(g.liters * 10) / 10)} L` : ''}</span></div>
         </div>
       ))}
@@ -224,6 +238,7 @@ function JuiceStock({ list, go }) {
   const cols = [...fmts].sort((a, b) => a[1] - b[1]).map((x) => x[0]);
   const rows = [...fams].sort((a, b) => a[0].localeCompare(b[0], 'fr'));
   const totQty = list.reduce((s, p) => s + Number(p.stock), 0);
+  const showVal = list.some((p) => p.sale_price !== undefined);
   const totSale = list.reduce((s, p) => s + Number(p.stock) * Number(p.sale_price || 0), 0);
   const totL = list.reduce((s, p) => s + Number(p.stock) * (Number(p.unit_volume) || 0), 0);
   return (
@@ -232,17 +247,17 @@ function JuiceStock({ list, go }) {
       <div className="chart-sum">
         <div><span>Unités en stock</span><b>{num(totQty)}</b></div>
         <div><span>Volume</span><b>{num(Math.round(totL * 10) / 10)} L</b></div>
-        <div><span>Valeur à la vente</span><b>{money(totSale)}</b></div>
+        {showVal && <div><span>Valeur à la vente</span><b>{money(totSale)}</b></div>}
       </div>
       {!rows.length ? <Empty t="Aucun produit fini" /> : (
         <div className="table-wrap"><table className="t js-t">
-          <thead><tr><th>Produit</th>{cols.map((c) => <th key={c} className="r">{c}</th>)}<th className="r">Valeur à la vente</th></tr></thead>
+          <thead><tr><th>Produit</th>{cols.map((c) => <th key={c} className="r">{c}</th>)}{showVal && <th className="r">Valeur à la vente</th>}</tr></thead>
           <tbody>{rows.map(([fam, byFmt]) => {
             const val = Object.values(byFmt).reduce((s, p) => s + Number(p.stock) * Number(p.sale_price || 0), 0);
             return (
               <tr key={fam}><td className="strong">{fam}</td>
                 {cols.map((c) => { const p = byFmt[c]; return <td key={c} className={'r nw mono' + (!p ? ' muted' : Number(p.stock) <= 0 ? ' zero' : '')}>{p ? <>{num(p.stock)}<small> {p.unit}</small></> : '—'}</td>; })}
-                <td className="r nw mono">{money(val)}</td></tr>
+                {showVal && <td className="r nw mono">{money(val)}</td>}</tr>
             );
           })}</tbody>
         </table></div>
@@ -277,7 +292,7 @@ function ProdMonth({ p, items, go }) {
     <div className="panel">
       <PanelHead ic="factory" t="Fabriqué ce mois" a="Production" on={() => go('production')} />
       <div className="cash-total"><span>Volume produit</span><b>{num(Math.round(Number(p.liters) * 10) / 10)} L</b></div>
-      <div className="muted small" style={{ marginBottom: 8 }}>{p.batches} production{p.batches > 1 ? 's' : ''} · coût total {money(p.cost)}{Number(p.rejected) > 0 ? ` · ${num(p.rejected)} rebut(s)` : ''}</div>
+      <div className="muted small" style={{ marginBottom: 8 }}>{p.batches} production{p.batches > 1 ? 's' : ''}{p.cost !== undefined ? ` · coût total ${money(p.cost)}` : ''}{Number(p.rejected) > 0 ? ` · ${num(p.rejected)} rebut(s)` : ''}</div>
       {!items.length && <Empty t="Rien de fabriqué ce mois-ci" />}
       {items.map((i) => (
         <div key={i.name} className="pf"><div className="pf-n">{i.name.replace(/^Jus de /, '')}</div><div className="pf-q">{num(i.qty)}<small>{i.unit}</small></div></div>
@@ -384,9 +399,11 @@ function Hero({ d, cashTotal, user, company, go, can }) {
   const first = (user?.name || '').split(' ')[0];
   const actions = [['ventes', 'Nouvelle vente', true], ['production', 'Production'], ['stock', 'Stock'], ['rapports', 'Rapports']].filter(([m]) => !can || can(m));
   const tiles = [
-    d.sales && ["Ventes d'aujourd'hui", money(d.sales.today), `${d.sales.today_count} vente(s)`],
-    d.sales && ['Ventes du mois', money(d.sales.month), `bénéfice ${money(d.sales.month_margin)}`],
+    d.sales && d.money !== false && ["Ventes d'aujourd'hui", money(d.sales.today), `${d.sales.today_count} vente(s)`],
+    d.sales && d.money !== false && ['Ventes du mois', money(d.sales.month), `bénéfice ${money(d.sales.month_margin)}`],
     d.cash && ['Argent disponible', money(cashTotal), 'tous comptes'],
+    d.sales && d.money === false && ["Ventes d'aujourd'hui", `${d.sales.today_count}`, `${num(d.sales.today_items)} article(s)`],
+    d.sales && d.money === false && ['Ventes du mois', `${d.sales.month_count}`, 'ventes enregistrées'],
   ].filter(Boolean);
   return (
     <>
@@ -397,7 +414,7 @@ function Hero({ d, cashTotal, user, company, go, can }) {
           <h2>{company?.name || 'Votre entreprise'}</h2>
           <p>{new Date().toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</p>
           <div className="row" style={{ marginTop: 16, flexWrap: 'wrap' }}>{actions.map(([m, l, primary]) => <button key={m} className={'btn' + (primary ? ' accent' : '')} onClick={() => go(m)}>{l}</button>)}
-            <button className="btn wa-btn" onClick={() => setDaily(true)}><Ic n="whatsapp" s={16} /> Résumé du jour</button></div>
+            {d.money !== false && <button className="btn wa-btn" onClick={() => setDaily(true)}><Ic n="whatsapp" s={16} /> Résumé du jour</button>}</div>
         </div>
         {tiles.length > 0 && (
           <div className="hero-tiles">

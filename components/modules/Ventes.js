@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react';
-import { api, op, crud, money, num, date, opts, today, LABELS } from '../../lib/client';
+import { api, op, crud, money, num, date, opts, today, LABELS, ACCESS } from '../../lib/client';
 import { Tabs, Badge, Modal, Stat, useRefOptions, useData, run, confirmDo, invalidateRefs, toast } from '../ui';
 import Commandes from './Commandes';
 import Depots from './Depots';
@@ -13,7 +13,7 @@ export default function Ventes({ can, company }) {
   const [tab, setTab] = useState('pos');
   return (
     <div>
-      <Tabs value={tab} onChange={setTab} tabs={[['pos', 'Point de vente'], ['hist', '📜 Historique des ventes'], ['cmd', 'Commandes clients'], ['depots', 'Vendeurs & dépôts'], ['docs', 'Factures, devis & commandes'], ['dettes', 'Dettes clients'], ['clients', 'Clients'], ['pay', 'Encaissements']]} />
+      <Tabs value={tab} onChange={setTab} tabs={[['pos', 'Point de vente'], ['hist', ACCESS.money ? '📜 Historique des ventes' : '📜 Mes ventes'], ['cmd', 'Commandes clients'], ['depots', 'Vendeurs & dépôts'], ['docs', 'Factures, devis & commandes'], ['dettes', 'Dettes clients'], ['clients', 'Clients'], ['pay', 'Encaissements']].filter(([k]) => ACCESS.money || !['dettes', 'pay'].includes(k))} />
       {tab === 'pos' && <POS />}
       {tab === 'hist' && <SalesHistory />}
       {tab === 'cmd' && <Commandes canProduce={!can || can('production')} />}
