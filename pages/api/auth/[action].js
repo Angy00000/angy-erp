@@ -1,6 +1,6 @@
 import bcrypt from 'bcryptjs';
 import { guardLogin } from '../../../lib/guardian';
-import { handler, fail, signToken, verifyToken, setAuthCookie, clearAuthCookie, audit, companyBlock } from '../../../lib/api';
+import { handler, fail, signToken, verifyToken, setAuthCookie, clearAuthCookie, audit, companyBlock, roleModules } from '../../../lib/api';
 import { q, one, tx } from '../../../lib/db';
 import { seedCompany } from '../../../lib/seed';
 import { getSettings, getContact } from '../../../lib/platform';
@@ -16,7 +16,10 @@ export default handler(async (req, res) => {
     const company = await one(`SELECT id,name,sector,currency,address,phone,email,ninea,rccm,tax_rate,invoice_footer,status,sub_end,logo,city,slogan,
       (sub_end - current_date) AS days_left FROM companies WHERE id=$1`, [p.cid]);
     const blocked = p.support ? null : await companyBlock(p.cid);
-    return { user: { ...u, cid: p.cid, support: !!p.support }, company, blocked, contact: await getContact() };
+    const role = p.support ? p.role : u.role;
+    let roleLabel = null;
+    try { roleLabel = (await one('SELECT label FROM company_roles WHERE company_id=$1 AND role=$2', [p.cid, role]))?.label || null; } catch { /* */ }
+    return { user: { ...u, role, cid: p.cid, support: !!p.support, modules: await roleModules(p.cid, role), role_label: roleLabel }, company, blocked, contact: await getContact() };
   }
 
   if (action === 'contact') return { ...(await getContact()), essai_jours: (await getSettings()).essai_jours };

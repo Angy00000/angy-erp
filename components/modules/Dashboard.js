@@ -45,20 +45,28 @@ const short = (v) => {
   return num(Math.round(v));
 };
 
+const famOf = (name) => { const r = /^(.*?)\s*\(([^)]*)\)\s*$/.exec(String(name || '').trim()); return r ? { fam: r[1].trim(), fmt: r[2].trim() } : { fam: String(name || '').trim(), fmt: '' }; };
+const STOCK_TYPES = [
+  ['pf', 'Produits prêts à vendre', 'Jus et autres produits finis (au prix de revient)', 'orange'],
+  ['semi_fini', 'Semi-finis', 'Produits en cours', 'violet'],
+  ['mp', 'Matières premières', 'Bissap, bouye, sucre, gingembre…', 'green'],
+  ['emballage', 'Emballages', 'Sachets, bouteilles, étiquettes…', 'blue'],
+  ['consommable', 'Consommables', 'Produits utilisés au quotidien', 'slate'],
+  ['materiel', 'Matériel', 'Équipements suivis en stock', 'slate'],
+];
+const hourOf = (v) => (v ? new Date(v).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : '');
+
 export default function Dashboard({ go, user, company, can }) {
   const { data: d, loading } = useData(() => report('dashboard'), []);
   if (loading && !d) return <div className="spinner">Chargement du tableau de bord…</div>;
   if (!d) return null;
-  const cashTotal = (d.cash || []).reduce((s, a) => s + a.balance, 0);
-  const kpis = [
-    d.sales && { ic: 'trend', tone: 'orange', k: 'Ventes du mois', v: money(d.sales.month), s: <>Marge brute <b>{money(d.sales.month_margin)}</b></>, to: 'rapports' },
-    d.cash && { ic: 'receipt', tone: 'red', k: 'Dépenses du mois', v: money(d.month_expenses), s: 'Toutes catégories', to: 'caisse' },
-    d.stock && { ic: 'box', tone: 'blue', k: 'Valeur du stock', v: money(d.stock.value), s: `${d.stock.items} article(s) en stock`, to: 'stock' },
-    d.sales && { ic: 'coins', tone: 'violet', k: 'Créances clients', v: money(d.sales.receivables), s: 'Reste à encaisser', to: 'ventes' },
-    d.payables !== undefined && { ic: 'truck', tone: 'slate', k: 'Dettes fournisseurs', v: money(d.payables), s: 'Reste à payer', to: 'achats' },
-    d.prod_month && { ic: 'factory', tone: 'green', k: 'Production du mois', v: num(d.prod_month.produced), s: `${d.prod_month.orders} production(s) · ${num(d.prod_month.rejected)} rebut(s)`, to: 'production' },
-    d.quality && { ic: 'shield', tone: d.quality.open_nc > 0 ? 'red' : 'green', k: 'Qualité', v: `${d.quality.open_nc} NC`, s: `${d.quality.blocked_lots} lot(s) bloqué(s) · ${d.quality.controls} contrôle(s)`, to: 'qualite' },
-    d.low && { ic: 'alert', tone: d.low.length ? 'orange' : 'green', k: 'Alertes stock', v: d.low.length + (d.expiring?.length || 0), s: `${d.low.length} stock bas · ${d.expiring?.length || 0} DLC proche`, to: 'stock' },
+  const cashTotal = (d.cash || []).reduce((s, a) => s + Number(a.balance || 0), 0);
+  const S = d.sales;
+  const others = [
+    d.cash && { ic: 'receipt', tone: 'red', k: 'Dépenses du mois', v: money(d.month_expenses), s: Number(d.month_expenses) ? 'Toutes catégories' : 'Aucune dépense enregistrée', to: 'caisse' },
+    d.payables !== undefined && Number(d.payables) > 0 && { ic: 'truck', tone: 'slate', k: 'Dettes fournisseurs', v: money(d.payables), s: 'Reste à payer', to: 'achats' },
+    d.quality && { ic: 'shield', tone: d.quality.open_nc > 0 ? 'red' : 'green', k: 'Qualité', v: d.quality.open_nc > 0 ? `${d.quality.open_nc} problème(s)` : 'RAS', s: `${d.quality.blocked_lots} lot(s) bloqué(s) · ${d.quality.controls} contrôle(s) ce mois`, to: 'qualite' },
+    d.low && { ic: 'alert', tone: d.low.length || d.expiring?.length ? 'orange' : 'green', k: 'Alertes stock', v: d.low.length + (d.expiring?.length || 0) || 'Aucune', s: `${d.low.length} stock bas · ${d.expiring?.length || 0} date limite proche`, to: 'stock' },
   ].filter(Boolean);
 
   return (
@@ -66,91 +74,214 @@ export default function Dashboard({ go, user, company, can }) {
       <Hero d={d} cashTotal={cashTotal} user={user} company={company} go={go} can={can} />
       {d.setup && <Setup s={d.setup} go={go} />}
 
-      <div className="kpis">
-        {kpis.map((x) => (
-          <button key={x.k} className={'kpi t-' + x.tone} onClick={() => go(x.to)}>
-            <span className="kpi-ic"><Ic n={x.ic} /></span>
-            <span className="kpi-k">{x.k}</span>
-            <span className="kpi-v">{x.v}</span>
-            <span className="kpi-s">{x.s}</span>
-          </button>
-        ))}
-      </div>
+      {S && (<>
+        <SecTitle t="Ventes" s="Ce qui a été vendu (ventes annulées non comptées)" />
+        <div className="kpis">
+          <Kpi ic="cart" tone="orange" k="Aujourd'hui" v={money(S.today)} s={<>{S.today_count} vente{S.today_count > 1 ? 's' : ''} · {num(S.today_items)} article{S.today_items > 1 ? 's' : ''}<br />Hier : {money(S.yesterday)}</>} on={() => go('ventes')} />
+          <Kpi ic="trend" tone="blue" k="7 derniers jours" v={money(S.week)} s={<>{S.week_count} vente{S.week_count > 1 ? 's' : ''}<br />≈ {money(S.week / 7)} par jour</>} on={() => go('ventes')} />
+          <Kpi ic="star" tone="green" k={`Ce mois (${new Date().toLocaleDateString('fr-FR', { month: 'long' })})`} v={money(S.month)} s={<>{S.month_count} vente{S.month_count > 1 ? 's' : ''}<br />Bénéfice sur les produits : <b className={S.month_margin < 0 ? 'neg' : 'pos'}>{money(S.month_margin)}</b></>} on={() => go('rapports')} />
+          <Kpi ic="coins" tone={S.receivables > 0 ? 'violet' : 'green'} k="Reste à encaisser" v={money(S.receivables)} s={S.receivables > 0 ? <>{S.receivables_count} vente{S.receivables_count > 1 ? 's' : ''} pas encore payée{S.receivables_count > 1 ? 's' : ''}</> : 'Tout est encaissé ✓'} on={() => go('ventes')} />
+        </div>
+        <div className="dgrid">
+          {d.daily && <SalesChart daily={d.daily} />}
+          {d.cash && <Treasury cash={d.cash} total={cashTotal} go={go} />}
+        </div>
+        <div className="dgrid">
+          {d.recent && <Recent list={d.recent} go={go} />}
+          {d.top && <TopByJuice top={d.top} />}
+        </div>
+      </>)}
+      {!S && d.cash && <div className="dgrid"><Treasury cash={d.cash} total={cashTotal} go={go} /></div>}
 
-      <div className="dgrid">
-        {d.daily && <SalesChart daily={d.daily} />}
-        {d.cash && (
-          <div className="panel">
-            <PanelHead ic="wallet" t="Trésorerie" a="Caisse" on={() => go('caisse')} />
-            <div className="cash-total"><span>Total disponible</span><b className={cashTotal < 0 ? 'neg' : ''}>{money(cashTotal)}</b></div>
-            {d.cash.map((a) => (
-              <div key={a.id} className="acc">
-                <span className={'acc-ic ' + a.type}><Ic n={a.type === 'banque' ? 'bank' : a.type === 'mobile_money' ? 'phone' : 'wallet'} s={16} /></span>
-                <span className="acc-n">{a.name}</span>
-                <span className={'acc-v mono' + (a.balance < 0 ? ' neg' : '')}>{money(a.balance)}</span>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
+      {(d.stock_types || d.pf_stock) && (<>
+        <SecTitle t="Stock" s="Ce que vous avez en ce moment" />
+        <div className="dgrid">
+          {d.pf_stock && <JuiceStock list={d.pf_stock} go={go} />}
+          {d.stock_types && <StockValue types={d.stock_types} total={d.stock?.value} go={go} />}
+        </div>
+      </>)}
 
-      <div className="dgrid">
-        {d.month_prod && <ProdProfit p={d.month_prod} go={go} />}
-        {d.pf_stock && (
-          <div className="panel">
-            <PanelHead ic="box" t="Produits finis en stock" a="Stock" on={() => go('stock')} />
-            {!d.pf_stock.length && <Empty t="Aucun produit fini" />}
-            {d.pf_stock.map((i) => (
-              <div key={i.id} className="pf">
-                <div className="pf-n">{i.name}<span>{money(i.sale_price)} / {i.unit}</span></div>
-                <div className={'pf-q' + (i.stock <= 0 ? ' zero' : '')}>{num(i.stock)}<small>{i.unit}</small></div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
+      {(d.prod_month || d.month_prod) && (<>
+        <SecTitle t="Production" s="Ce qui a été fabriqué ce mois-ci" />
+        <div className="dgrid">
+          {d.month_prod && <ProdProfit p={d.month_prod} go={go} />}
+          {d.prod_month && <ProdMonth p={d.prod_month} items={d.prod_items || []} go={go} />}
+        </div>
+      </>)}
+
+      {others.length > 0 && (<>
+        <SecTitle t="À surveiller" s="Dépenses, alertes et qualité" />
+        <div className="kpis">{others.map((x) => <Kpi key={x.k} {...x} on={() => go(x.to)} />)}</div>
+      </>)}
 
       <div className="dgrid three">
-        {d.top && (
-          <div className="panel">
-            <PanelHead ic="star" t="Meilleures ventes du mois" />
-            {!d.top.length && <Empty t="Aucune vente ce mois-ci" />}
-            {d.top.map((t, i) => {
-              const max = d.top[0]?.total || 1;
-              return (
-                <div key={t.name} className="rank">
-                  <span className={'rank-n r' + i}>{i + 1}</span>
-                  <div className="rank-b"><div className="rank-t"><span>{t.name}</span><b className="mono">{money(t.total)}</b></div>
-                    <div className="track"><div className="fill" style={{ width: `${(t.total / max) * 100}%` }} /></div>
-                    <span className="muted small">{num(t.qty)} vendu(s)</span></div>
-                </div>
-              );
-            })}
-          </div>
-        )}
         {(d.low || d.expiring) && (
           <div className="panel">
-            <PanelHead ic="alert" t="À surveiller" a="Stock" on={() => go('stock')} />
+            <PanelHead ic="alert" t="Stock bas et dates limites" a="Stock" on={() => go('stock')} />
             {!d.low?.length && !d.expiring?.length && <Empty t="Tout est en ordre 👌" ok />}
             {(d.low || []).map((i) => (
-              <div key={'l' + i.id} className="watch"><span className="dot orange" /><span className="w-n">{i.name}<small>Stock bas</small></span><span className="mono neg">{num(i.stock)} / {num(i.min_stock)} {i.unit}</span></div>
+              <div key={'l' + i.id} className="watch"><span className="dot orange" /><span className="w-n">{i.name}<small>Stock bas (minimum {num(i.min_stock)})</small></span><span className="mono neg">{num(i.stock)} {i.unit}</span></div>
             ))}
             {(d.expiring || []).map((l) => {
               const dd = daysUntil(l.expiry_date);
-              return <div key={'e' + l.id} className="watch"><span className={'dot ' + (dd < 0 ? 'red' : 'yellow')} /><span className="w-n">{l.name}<small>Lot {l.lot_number} · {num(l.qty)} {l.unit}</small></span><Badge v={dd < 0 ? 'perime' : dd < 8 ? 'bloque' : 'partiel'}>{dd < 0 ? 'Périmé' : `J-${dd}`}</Badge></div>;
+              return <div key={'e' + l.id} className="watch"><span className={'dot ' + (dd < 0 ? 'red' : 'yellow')} /><span className="w-n">{l.name}<small>Lot {l.lot_number} · {num(l.qty)} {l.unit}</small></span><Badge v={dd < 0 ? 'perime' : dd < 8 ? 'bloque' : 'partiel'}>{dd < 0 ? 'Périmé' : `Dans ${dd} j`}</Badge></div>;
             })}
           </div>
         )}
         {d.production && (
           <div className="panel">
-            <PanelHead ic="clock" t="Production à venir" a="Planning" on={() => go('production')} />
-            {!d.production.length && <Empty t="Aucune production planifiée" />}
+            <PanelHead ic="clock" t="Productions prévues" a="Production" on={() => go('production')} />
+            {!d.production.length && <Empty t="Aucune production prévue" />}
             {d.production.map((p) => (
-              <div key={p.id} className="watch"><span className="dot blue" /><span className="w-n">{p.product_name}<small>{p.number} · {num(p.planned_qty)} prévus · {date(p.planned_date)}</small></span><Badge v={p.status} map="prod_status" /></div>
+              <div key={p.id} className="watch"><span className="dot blue" /><span className="w-n">{p.product_name}<small>{num(p.planned_qty)} prévus · {date(p.planned_date)}</small></span><Badge v={p.status} map="prod_status" /></div>
             ))}
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+const SecTitle = ({ t, s }) => <div className="dsec"><h3>{t}</h3>{s && <span>{s}</span>}</div>;
+function Kpi({ ic, tone, k, v, s, on }) {
+  return (
+    <button className={'kpi t-' + tone} onClick={on}>
+      <span className="kpi-ic"><Ic n={ic} /></span>
+      <span className="kpi-k">{k}</span>
+      <span className="kpi-v">{v}</span>
+      <span className="kpi-s">{s}</span>
+    </button>
+  );
+}
+
+function Treasury({ cash, total, go }) {
+  return (
+    <div className="panel">
+      <PanelHead ic="wallet" t="Argent disponible" a="Caisse" on={() => go('caisse')} />
+      <div className="cash-total"><span>Total, tous comptes</span><b className={total < 0 ? 'neg' : ''}>{money(total)}</b></div>
+      {cash.map((a) => (
+        <div key={a.id} className="acc">
+          <span className={'acc-ic ' + a.type}><Ic n={a.type === 'banque' ? 'bank' : a.type === 'mobile_money' ? 'phone' : 'wallet'} s={16} /></span>
+          <span className="acc-n">{a.name}</span>
+          <span className={'acc-v mono' + (a.balance < 0 ? ' neg' : Number(a.balance) === 0 ? ' muted' : '')}>{money(a.balance)}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function Recent({ list, go }) {
+  return (
+    <div className="panel wide">
+      <PanelHead ic="receipt" t="Dernières ventes" a="Historique des ventes" on={() => go('ventes')} />
+      {!list.length && <Empty t="Aucune vente pour l'instant" />}
+      {list.map((v) => {
+        const due = Number(v.total) - Number(v.paid);
+        const isToday = String(v.date).slice(0, 10) === today();
+        return (
+          <div key={v.id} className="rs">
+            <div className="rs-when"><b>{isToday ? hourOf(v.created_at) : date(v.date)}</b><span>{isToday ? "aujourd'hui" : v.number}</span></div>
+            <div className="rs-what"><b>{v.customer_name || 'Client comptoir'}</b>{v.user_name && <span className="muted small"> · {v.user_name}</span>}<div className="rs-items">{(v.items || '').replace(/Jus de /g, '')}</div></div>
+            <div className="rs-amt"><b>{money(v.total)}</b>{due > 0.009 ? <span className="badge red">Doit {money(due)}</span> : <span className="badge green">Payée</span>}</div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// Ventes du mois regroupées par jus (avec le détail par format)
+function TopByJuice({ top }) {
+  const m = new Map();
+  for (const t of top) { const { fam, fmt } = famOf(t.name); if (!m.has(fam)) m.set(fam, { fam, total: 0, liters: 0, fmts: [] }); const g = m.get(fam); g.total += Number(t.total); g.liters += Number(t.qty) * (Number(t.unit_volume) || 0); g.fmts.push({ fmt: fmt || t.unit, qty: Number(t.qty), unit: t.unit }); }
+  const list = [...m.values()].sort((a, b) => b.total - a.total);
+  const max = list[0]?.total || 1;
+  return (
+    <div className="panel">
+      <PanelHead ic="star" t="Ce qui se vend le mieux (ce mois)" />
+      {!list.length && <Empty t="Aucune vente ce mois-ci" />}
+      {list.slice(0, 7).map((g, i) => (
+        <div key={g.fam} className="rank">
+          <span className={'rank-n r' + i}>{i + 1}</span>
+          <div className="rank-b"><div className="rank-t"><span>{g.fam}</span><b className="mono">{money(g.total)}</b></div>
+            <div className="track"><div className="fill" style={{ width: `${(g.total / max) * 100}%` }} /></div>
+            <span className="muted small">{g.fmts.map((f) => `${num(f.qty)} ${f.fmt}`).join(' · ')}{g.liters > 0 ? ` — ${num(Math.round(g.liters * 10) / 10)} L` : ''}</span></div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// Jus en stock : un tableau goût × format
+function JuiceStock({ list, go }) {
+  const fams = new Map(); const fmts = new Map();
+  for (const p of list) {
+    const { fam, fmt } = famOf(p.name); const f = fmt || p.unit || '—';
+    if (!fams.has(fam)) fams.set(fam, {});
+    fams.get(fam)[f] = p;
+    if (!fmts.has(f)) fmts.set(f, Number(p.unit_volume) || 0);
+  }
+  const cols = [...fmts].sort((a, b) => a[1] - b[1]).map((x) => x[0]);
+  const rows = [...fams].sort((a, b) => a[0].localeCompare(b[0], 'fr'));
+  const totQty = list.reduce((s, p) => s + Number(p.stock), 0);
+  const totSale = list.reduce((s, p) => s + Number(p.stock) * Number(p.sale_price || 0), 0);
+  const totL = list.reduce((s, p) => s + Number(p.stock) * (Number(p.unit_volume) || 0), 0);
+  return (
+    <div className="panel wide">
+      <PanelHead ic="box" t="Produits prêts à vendre" a="Stock" on={() => go('stock')} />
+      <div className="chart-sum">
+        <div><span>Unités en stock</span><b>{num(totQty)}</b></div>
+        <div><span>Volume</span><b>{num(Math.round(totL * 10) / 10)} L</b></div>
+        <div><span>Valeur à la vente</span><b>{money(totSale)}</b></div>
+      </div>
+      {!rows.length ? <Empty t="Aucun produit fini" /> : (
+        <div className="table-wrap"><table className="t js-t">
+          <thead><tr><th>Produit</th>{cols.map((c) => <th key={c} className="r">{c}</th>)}<th className="r">Valeur à la vente</th></tr></thead>
+          <tbody>{rows.map(([fam, byFmt]) => {
+            const val = Object.values(byFmt).reduce((s, p) => s + Number(p.stock) * Number(p.sale_price || 0), 0);
+            return (
+              <tr key={fam}><td className="strong">{fam}</td>
+                {cols.map((c) => { const p = byFmt[c]; return <td key={c} className={'r nw mono' + (!p ? ' muted' : Number(p.stock) <= 0 ? ' zero' : '')}>{p ? <>{num(p.stock)}<small> {p.unit}</small></> : '—'}</td>; })}
+                <td className="r nw mono">{money(val)}</td></tr>
+            );
+          })}</tbody>
+        </table></div>
+      )}
+    </div>
+  );
+}
+
+function StockValue({ types, total, go }) {
+  const by = Object.fromEntries(types.map((t) => [t.type, t]));
+  const rows = STOCK_TYPES.filter(([k]) => by[k] && Number(by[k].value) > 0).map(([k, l, s, tone]) => ({ k, l, s, tone, ...by[k] }));
+  const sum = Number(total) || rows.reduce((a, r) => a + Number(r.value), 0);
+  return (
+    <div className="panel">
+      <PanelHead ic="coins" t="Valeur du stock" a="Stock" on={() => go('stock')} />
+      <div className="cash-total"><span>Tout le stock (prix d'achat / de revient)</span><b>{money(sum)}</b></div>
+      <div className="sv-bar">{rows.map((r) => <i key={r.k} className={'t-' + r.tone} style={{ width: `${(Number(r.value) / (sum || 1)) * 100}%` }} title={r.l} />)}</div>
+      {rows.map((r) => (
+        <div key={r.k} className="sv-row">
+          <span className={'sv-dot t-' + r.tone} />
+          <span className="sv-n">{r.l}<small>{r.s} · {r.items} article{r.items > 1 ? 's' : ''}</small></span>
+          <span className="sv-v mono">{money(r.value)}<small>{Math.round((Number(r.value) / (sum || 1)) * 100)} %</small></span>
+        </div>
+      ))}
+      {by.pf && Number(by.pf.sale_value) > 0 && <div className="note small" style={{ marginTop: 10 }}>Les produits prêts à vendre valent <b>{money(by.pf.sale_value)}</b> au prix de vente (coût : {money(by.pf.value)}).</div>}
+    </div>
+  );
+}
+
+function ProdMonth({ p, items, go }) {
+  return (
+    <div className="panel">
+      <PanelHead ic="factory" t="Fabriqué ce mois" a="Production" on={() => go('production')} />
+      <div className="cash-total"><span>Volume produit</span><b>{num(Math.round(Number(p.liters) * 10) / 10)} L</b></div>
+      <div className="muted small" style={{ marginBottom: 8 }}>{p.batches} production{p.batches > 1 ? 's' : ''} · coût total {money(p.cost)}{Number(p.rejected) > 0 ? ` · ${num(p.rejected)} rebut(s)` : ''}</div>
+      {!items.length && <Empty t="Rien de fabriqué ce mois-ci" />}
+      {items.map((i) => (
+        <div key={i.name} className="pf"><div className="pf-n">{i.name.replace(/^Jus de /, '')}</div><div className="pf-q">{num(i.qty)}<small>{i.unit}</small></div></div>
+      ))}
     </div>
   );
 }
@@ -173,11 +304,11 @@ function SalesChart({ daily }) {
   const margin = daily.reduce((a, x) => a + (Number(x.margin) || 0), 0);
   return (
     <div className="panel wide">
-      <PanelHead ic="trend" t="Ventes des 30 derniers jours" />
+      <PanelHead ic="trend" t="Ventes jour par jour (30 derniers jours)" />
       <div className="chart-sum">
         <div><span>Total</span><b>{money(total)}</b></div>
-        <div><span>Marge brute</span><b>{money(margin)}</b></div>
-        <div><span>Moyenne / jour de vente</span><b>{money(days ? total / days : 0)}</b></div>
+        <div><span>Bénéfice sur les produits</span><b>{money(margin)}</b></div>
+        <div><span>Moyenne par jour de vente</span><b>{money(days ? total / days : 0)}</b></div>
       </div>
       <div className="chart">
         <div className="chart-y"><span>{short(max)}</span><span>{short(max / 2)}</span><span>0</span></div>
@@ -202,17 +333,17 @@ function SalesChart({ daily }) {
 function ProdProfit({ p, go }) {
   return (
     <div className="panel wide">
-      <PanelHead ic="factory" t="Rentabilité des productions du mois" a="Détails" on={() => go('production')} />
+      <PanelHead ic="factory" t="Est-ce que les productions du mois rapportent ?" a="Détails" on={() => go('production')} />
       <div className="chart-sum four">
-        <div><span>Dépensé</span><b>{money(p.cost)}</b></div>
-        <div><span>Rapporté</span><b>{money(p.revenue)}</b></div>
+        <div><span>Coût de fabrication</span><b>{money(p.cost)}</b></div>
+        <div><span>Déjà vendu pour</span><b>{money(p.revenue)}</b></div>
         <div><span>Bénéfice réalisé</span><b className={p.profit < 0 ? 'neg' : 'pos'}>{money(p.profit)}</b></div>
-        <div><span>Bénéfice prévu</span><b>{money(p.projected)}</b></div>
+        <div><span>Bénéfice si tout est vendu</span><b>{money(p.projected)}</b></div>
       </div>
       {!p.rows.length && <Empty t="Aucune production terminée ce mois-ci — utilisez « ⚡ Production rapide »." />}
       {p.rows.length > 0 && (
         <div className="table-wrap"><table className="t pp">
-          <thead><tr><th>Production</th><th className="r">Produit</th><th className="r">Coût</th><th>Vendu</th><th className="r">Rapporté</th><th className="r">Bénéfice</th></tr></thead>
+          <thead><tr><th>Production</th><th className="r">Fabriqué</th><th className="r">Coût</th><th>Déjà vendu</th><th className="r">Vendu pour</th><th className="r">Bénéfice</th></tr></thead>
           <tbody>{p.rows.map((r) => (
             <tr key={r.id}>
               <td><b>{r.product}</b><br /><span className="muted small">{r.number} · {date(r.date)}</span></td>
@@ -253,9 +384,9 @@ function Hero({ d, cashTotal, user, company, go, can }) {
   const first = (user?.name || '').split(' ')[0];
   const actions = [['ventes', 'Nouvelle vente', true], ['production', 'Production'], ['stock', 'Stock'], ['rapports', 'Rapports']].filter(([m]) => !can || can(m));
   const tiles = [
-    d.sales && ['Ventes du jour', money(d.sales.today), `${d.sales.today_count} vente(s)`],
-    d.cash && ['Trésorerie', money(cashTotal), `${d.cash.length} compte(s)`],
-    d.month_prod && ['Bénéfice du mois', money(d.month_prod.profit), `${d.month_prod.count} production(s)`],
+    d.sales && ["Ventes d'aujourd'hui", money(d.sales.today), `${d.sales.today_count} vente(s)`],
+    d.sales && ['Ventes du mois', money(d.sales.month), `bénéfice ${money(d.sales.month_margin)}`],
+    d.cash && ['Argent disponible', money(cashTotal), 'tous comptes'],
   ].filter(Boolean);
   return (
     <>

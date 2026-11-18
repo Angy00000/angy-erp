@@ -1,7 +1,7 @@
 import { handler, fail, n } from '../../../lib/api';
 import { q, one } from '../../../lib/db';
-import { can } from '../../../lib/perms';
-import { guardChecks } from '../../../lib/guardian';
+import { can, ROLES, ASSIGNABLE, mergeRoles } from '../../../lib/perms';
+import { guardChecks, alert } from '../../../lib/guardian';
 
 // Commandes clients en cours + ce qu'il faut produire. Le stock disponible est réservé aux commandes
 // dans l'ordre des dates de livraison (la plus proche d'abord).
@@ -74,7 +74,7 @@ export async function buyList(cid, days = 14) {
 export default handler(async (req, res, user) => {
   const { action } = req.query;
   const cid = user.cid;
-  const c = (m) => can(user.role, m);
+  const c = (m) => can(user, m);
 
   if (action === 'search') {
     const s = String(req.query.q || '').trim();
@@ -349,6 +349,52 @@ export default handler(async (req, res, user) => {
       WHERE company_id=$1 AND created_at > now() - ($2::int * interval '1 day') ORDER BY id DESC LIMIT 500`, [cid, days, seen]);
     return { list, unread: Number(unread.n), seen_until: seen };
   }
+  // Rôles de l'entreprise : voir et modifier ce que chaque rôle peut ouvrir (administrateur seulement)
+  if (action === 'roles') {
+    if (!c('admin')) fail('Accès refusé pour votre rôle', 403);
+    const custom = await q('SELECT role,label,modules FROM company_roles WHERE company_id=$1', [cid]);
+    const counts = await q('SELECT role, COUNT(*)::int AS n FROM users WHERE company_id=$1 GROUP BY role', [cid]);
+    const all = mergeRoles(custom);
+    return Object.entries(all).map(([key, r]) => ({ key, label: r.label, modules: r.modules === '*' ? '*' : r.modules, builtin: !!ROLES[key], changed: !!r.custom && !!ROLES[key],
+      default_modules: ROLES[key] ? ROLES[key].modules : null, users: counts.find((x) => x.role === key)?.n || 0 }));
+  }
+  if (action === 'roles_save' || action === 'roles_delete') {
+    if (!c('admin')) fail('Accès refusé pour votre rôle', 403);
+    if (req.method !== 'POST') fail('Méthode non supportée', 405);
+    const b = req.body || {};
+    let key = String(b.key || '').trim();
+    if (key === 'admin') fail("Le rôle Administrateur a toujours accès à tout : il ne se modifie pas");
+    if (action === 'roles_delete') {
+      const row = await one('SELECT * FROM company_roles WHERE company_id=$1 AND role=$2', [cid, key]);
+      if (!row) fail(ROLES[key] ? 'Ce rôle a déjà ses droits par défaut' : 'Rôle introuvable');
+      if (!ROLES[key]) {
+        const used = await one('SELECT COUNT(*)::int AS n FROM users WHERE company_id=$1 AND role=$2', [cid, key]);
+        if (used.n > 0) fail(`${used.n} utilisateur(s) ont ce rôle : donnez-leur un autre rôle avant de le supprimer`);
+      }
+      await q('DELETE FROM company_roles WHERE company_id=$1 AND role=$2', [cid, key]);
+      await alert(user, { kind: 'droits', level: 'attention', mod: 'admin', title: ROLES[key] ? `Rôle « ${ROLES[key].label} » remis par défaut` : `Rôle « ${row.label} » supprimé` });
+      return { ok: true };
+    }
+    const label = String(b.label || '').trim().slice(0, 60);
+    if (!label) fail('Donnez un nom au rôle');
+    const valid = new Set(ASSIGNABLE.map((m) => m.key));
+    const modules = [...new Set((Array.isArray(b.modules) ? b.modules : []).filter((m) => valid.has(m)))];
+    if (!key) {
+      key = 'r_' + label.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '').slice(0, 30);
+      if (key === 'r_' ) key = 'r_role';
+      if (ROLES[key] || await one('SELECT 1 FROM company_roles WHERE company_id=$1 AND role=$2', [cid, key])) key += '_' + Date.now().toString(36).slice(-4);
+    } else if (!ROLES[key] && !(await one('SELECT 1 FROM company_roles WHERE company_id=$1 AND role=$2', [cid, key]))) fail('Rôle introuvable');
+    const before = (await one('SELECT label, modules FROM company_roles WHERE company_id=$1 AND role=$2', [cid, key])) || (ROLES[key] ? { label: ROLES[key].label, modules: ROLES[key].modules } : null);
+    await q(`INSERT INTO company_roles (company_id,role,label,modules) VALUES ($1,$2,$3,$4)
+      ON CONFLICT (company_id,role) DO UPDATE SET label=EXCLUDED.label, modules=EXCLUDED.modules, updated_at=now()`, [cid, key, label, modules]);
+    const name = (k) => ASSIGNABLE.find((m) => m.key === k)?.label || k;
+    const added = before ? modules.filter((m) => !before.modules.includes(m)) : modules;
+    const removed = before ? before.modules.filter((m) => valid.has(m) && !modules.includes(m)) : [];
+    const msg = [added.length && `ajouté : ${added.map(name).join(', ')}`, removed.length && `retiré : ${removed.map(name).join(', ')}`].filter(Boolean).join(' · ');
+    await alert(user, { kind: 'droits', level: added.length ? 'attention' : 'info', mod: 'admin', title: before ? `Droits du rôle « ${label} » modifiés` : `Nouveau rôle « ${label} »`, message: msg || 'nom modifié' });
+    return { ok: true, key };
+  }
+
   if (action === 'guardian_seen') {
     if (!c('gardien')) fail('Accès refusé pour votre rôle', 403);
     if (user.support) return { ok: true };

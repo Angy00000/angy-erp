@@ -1,10 +1,17 @@
 import bcrypt from 'bcryptjs';
 import { handler, fail, audit, nextNumber } from '../../../../lib/api';
 import { guardCrud } from '../../../../lib/guardian';
-import { can } from '../../../../lib/perms';
+import { can, ROLES } from '../../../../lib/perms';
 import { ENTITIES } from '../../../../lib/entities';
 import { q, one, tx } from '../../../../lib/db';
 import { cashTx } from '../../../../lib/stock';
+
+// Le rôle donné à un utilisateur doit exister (rôle par défaut ou créé par l'entreprise)
+async function checkRole(t, cid, role) {
+  if (ROLES[role]) return;
+  const r = await t.one('SELECT 1 AS ok FROM company_roles WHERE company_id=$1 AND role=$2', [cid, role]);
+  if (!r) fail('Rôle inconnu');
+}
 
 const clean = (v) => (v === '' || v === undefined ? null : v);
 
@@ -53,8 +60,8 @@ export default handler(async (req, res, user) => {
   const id = req.query.id ? parseInt(req.query.id[0], 10) : null;
   const cfg = ENTITIES[entity];
   if (!cfg) fail('Ressource inconnue', 404);
-  const canWrite = can(user.role, cfg.module);
-  const canRead = canWrite || (cfg.readModules || []).some((m) => can(user.role, m));
+  const canWrite = can(user, cfg.module);
+  const canRead = canWrite || (cfg.readModules || []).some((m) => can(user, m));
   if (!canRead) fail('Accès refusé pour votre rôle', 403);
   const cid = user.cid;
 
@@ -104,6 +111,7 @@ export default handler(async (req, res, user) => {
         if (!body.password || body.password.length < 6) fail('Mot de passe de 6 caractères minimum');
         data.email = String(data.email || '').trim().toLowerCase();
         data.password_hash = await bcrypt.hash(body.password, 10);
+        await checkRole(t, cid, data.role || 'vente');
       }
       if (cfg.numbering) {
         const nb = cfg.numbering(data);
@@ -150,6 +158,7 @@ export default handler(async (req, res, user) => {
           data.password_hash = await bcrypt.hash(body.password, 10);
         }
         if (id === user.uid && (data.role && data.role !== 'admin' || data.active === false)) fail('Vous ne pouvez pas retirer vos propres droits administrateur');
+        if (data.role) await checkRole(t, cid, data.role);
       }
       const keys = Object.keys(data);
       if (keys.length) await t.q(`UPDATE ${cfg.table} SET ${keys.map((k, i) => `${k}=$${i + 3}`).join(',')} WHERE id=$1 AND company_id=$2`, [id, cid, ...Object.values(data)]);

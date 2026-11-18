@@ -50,7 +50,7 @@ const REPORTS = {
   dashboard: [null, async (cid, qs, user) => {
     const t = today(), m = monthStart();
     const out = { role: user.role };
-    const show = (mod) => can(user.role, mod);
+    const show = (mod) => can(user, mod);
     if (show('admin')) {
       out.setup = await one(`SELECT
         (SELECT COUNT(*) FROM companies WHERE id=$1 AND (phone IS NOT NULL OR ninea IS NOT NULL)) AS company,
@@ -66,16 +66,28 @@ const REPORTS = {
       out.sales = await one(`SELECT
         COALESCE(SUM(total) FILTER (WHERE date=$2),0) AS today,
         COALESCE(COUNT(*) FILTER (WHERE date=$2),0) AS today_count,
+        COALESCE(SUM(total) FILTER (WHERE date=$2::date-1),0) AS yesterday,
+        COALESCE(SUM(total) FILTER (WHERE date>$2::date-7),0) AS week,
+        COALESCE(COUNT(*) FILTER (WHERE date>$2::date-7),0) AS week_count,
         COALESCE(SUM(total) FILTER (WHERE date>=$3),0) AS month,
+        COALESCE(COUNT(*) FILTER (WHERE date>=$3),0) AS month_count,
+        COALESCE(SUM(cost) FILTER (WHERE date>=$3),0) AS month_cost,
         COALESCE(SUM(total-cost) FILTER (WHERE date>=$3),0) AS month_margin,
-        COALESCE(SUM(total-paid),0) AS receivables
+        COALESCE(SUM(paid) FILTER (WHERE date>=$3),0) AS month_paid,
+        COALESCE(SUM(total-paid),0) AS receivables,
+        COALESCE(COUNT(*) FILTER (WHERE total-paid>0.009),0) AS receivables_count
         FROM sales_docs d WHERE company_id=$1 AND ${SALES_OK}`, [cid, t, m]);
-      out.daily = await q(`SELECT g::date::text AS day, COALESCE(SUM(d.total),0) AS total, COALESCE(SUM(d.total-d.cost),0) AS margin
+      out.sales.today_items = n((await one(`SELECT COALESCE(SUM(sl.qty),0) AS s FROM sales_lines sl JOIN sales_docs d ON d.id=sl.doc_id WHERE d.company_id=$1 AND ${SALES_OK} AND d.date=$2`, [cid, t])).s);
+      out.daily = await q(`SELECT g::date::text AS day, COALESCE(SUM(d.total),0) AS total, COALESCE(SUM(d.total-d.cost),0) AS margin, COUNT(d.id) AS n
         FROM generate_series(current_date-29, current_date, '1 day') g
         LEFT JOIN sales_docs d ON d.date=g::date AND d.company_id=$1 AND ${SALES_OK} GROUP BY g ORDER BY g`, [cid]);
-      out.top = await q(`SELECT i.name, SUM(sl.qty) AS qty, SUM(sl.total) AS total FROM sales_lines sl
+      out.top = await q(`SELECT i.name, i.unit, i.unit_volume, SUM(sl.qty) AS qty, SUM(sl.total) AS total FROM sales_lines sl
         JOIN sales_docs d ON d.id=sl.doc_id JOIN items i ON i.id=sl.item_id
-        WHERE d.company_id=$1 AND ${SALES_OK} AND d.date>=$2 GROUP BY i.name ORDER BY total DESC LIMIT 6`, [cid, m]);
+        WHERE d.company_id=$1 AND ${SALES_OK} AND d.date>=$2 GROUP BY i.name, i.unit, i.unit_volume ORDER BY total DESC LIMIT 40`, [cid, m]);
+      out.recent = await q(`SELECT d.id, d.number, d.date, d.created_at, d.total, d.paid, d.status, c.name AS customer_name, u.name AS user_name,
+        (SELECT string_agg(trim(to_char(sl.qty,'FM999990.###'))||' × '||i.name, ', ' ORDER BY sl.id) FROM sales_lines sl JOIN items i ON i.id=sl.item_id WHERE sl.doc_id=d.id) AS items
+        FROM sales_docs d LEFT JOIN customers c ON c.id=d.customer_id LEFT JOIN users u ON u.id=d.user_id
+        WHERE d.company_id=$1 AND ${SALES_OK} ORDER BY d.date DESC, d.created_at DESC LIMIT 6`, [cid]);
     }
     if (show('caisse')) {
       out.cash = await q(`SELECT a.id,a.name,a.type, a.initial_balance+COALESCE((SELECT SUM(amount) FROM cash_transactions t WHERE t.account_id=a.id),0) AS balance
@@ -85,6 +97,9 @@ const REPORTS = {
     if (show('stock') || show('production')) {
       out.stock = await one(`SELECT COALESCE(SUM(l.qty*l.unit_cost),0) AS value,
         COUNT(DISTINCT l.item_id) FILTER (WHERE l.qty>0) AS items FROM lots l WHERE l.company_id=$1 AND l.status='ok'`, [cid]);
+      out.stock_types = await q(`SELECT i.type, COUNT(DISTINCT i.id) FILTER (WHERE l.qty>0) AS items, COALESCE(SUM(l.qty*l.unit_cost),0) AS value,
+        COALESCE(SUM(l.qty*i.sale_price) FILTER (WHERE i.type IN ('pf','semi_fini')),0) AS sale_value
+        FROM lots l JOIN items i ON i.id=l.item_id WHERE l.company_id=$1 AND l.status='ok' AND l.qty>0 GROUP BY i.type`, [cid]);
       out.low = await q(`SELECT * FROM (SELECT i.id,i.name,i.unit,i.min_stock, COALESCE((SELECT SUM(qty) FROM lots l WHERE l.item_id=i.id AND l.status='ok'),0) AS stock
         FROM items i WHERE i.company_id=$1 AND i.active AND i.type<>'service' AND i.min_stock>0) x WHERE stock<min_stock ORDER BY stock/NULLIF(min_stock,0) LIMIT 10`, [cid]);
       out.expiring = await q(`SELECT l.id,l.lot_number,l.qty,l.expiry_date,i.name,i.unit FROM lots l JOIN items i ON i.id=l.item_id
@@ -93,8 +108,11 @@ const REPORTS = {
     if (show('production')) {
       out.production = await q(`SELECT po.id,po.number,po.status,po.planned_qty,po.planned_date,i.name AS product_name FROM production_orders po
         LEFT JOIN items i ON i.id=po.product_id WHERE po.company_id=$1 AND po.status IN ('planifie','en_cours') ORDER BY po.planned_date NULLS LAST LIMIT 8`, [cid]);
-      out.prod_month = await one(`SELECT COALESCE(SUM(produced_qty),0) AS produced, COALESCE(SUM(rejected_qty),0) AS rejected, COUNT(*) AS orders
-        FROM production_orders WHERE company_id=$1 AND status='termine' AND finished_at>=$2`, [cid, m]);
+      out.prod_month = await one(`SELECT COALESCE(SUM(po.produced_qty),0) AS produced, COALESCE(SUM(po.rejected_qty),0) AS rejected, COUNT(*) AS orders,
+        COUNT(DISTINCT COALESCE(po.batch_id, po.id)) AS batches, COALESCE(SUM(po.produced_qty*COALESCE(i.unit_volume,0)),0) AS liters, COALESCE(SUM(po.total_cost),0) AS cost
+        FROM production_orders po LEFT JOIN items i ON i.id=po.product_id WHERE po.company_id=$1 AND po.status='termine' AND po.finished_at>=$2`, [cid, m]);
+      out.prod_items = await q(`SELECT i.name, i.unit, SUM(po.produced_qty) AS qty FROM production_orders po JOIN items i ON i.id=po.product_id
+        WHERE po.company_id=$1 AND po.status='termine' AND po.finished_at>=$2 GROUP BY i.name, i.unit ORDER BY i.name`, [cid, m]);
     }
     if (show('production') || show('rapports')) {
       const rows = await profitRows(cid, 'po.finished_at::date BETWEEN $2 AND $3', [m, t]);
@@ -108,8 +126,9 @@ const REPORTS = {
       };
     }
     if (show('stock') || show('ventes') || show('production')) {
-      out.pf_stock = await q(`SELECT i.id, i.name, i.unit, i.sale_price, COALESCE(SUM(l.qty),0) AS stock FROM items i LEFT JOIN lots l ON l.item_id=i.id AND l.status='ok'
-        WHERE i.company_id=$1 AND i.type='pf' AND i.active GROUP BY i.id ORDER BY stock DESC, i.name LIMIT 12`, [cid]);
+      out.pf_stock = await q(`SELECT i.id, i.name, i.unit, i.unit_volume, i.sale_price, COALESCE(SUM(l.qty),0) AS stock, COALESCE(SUM(l.qty*l.unit_cost),0) AS cost_value
+        FROM items i LEFT JOIN lots l ON l.item_id=i.id AND l.status='ok'
+        WHERE i.company_id=$1 AND i.type='pf' AND i.active GROUP BY i.id ORDER BY i.name LIMIT 80`, [cid]);
     }
     if (show('qualite')) {
       out.quality = await one(`SELECT (SELECT COUNT(*) FROM nonconformities WHERE company_id=$1 AND status<>'cloturee') AS open_nc,
@@ -293,7 +312,7 @@ export default handler(async (req, res, user) => {
   const [mods, fn] = r;
   if (mods) {
     const list = Array.isArray(mods) ? mods : [mods];
-    if (!list.some((m) => can(user.role, m))) fail('Accès refusé pour votre rôle', 403);
+    if (!list.some((m) => can(user, m))) fail('Accès refusé pour votre rôle', 403);
   }
   return fn(user.cid, req.query, user);
 });

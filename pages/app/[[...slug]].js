@@ -57,7 +57,7 @@ export default function AppShell() {
   if (me.blocked) return <Blocked msg={me.blocked} company={me.company} contact={me.contact || {}} onLogout={logout} />;
 
   const role = me.user.role;
-  const can = (m) => canRole(role, m);
+  const can = (m) => canRole({ role, modules: me.user.modules }, m);
   const visible = MODULES.filter((m) => can(m.key) || (m.key === 'rapports' && ['ventes', 'stock', 'production', 'caisse', 'qualite'].some(can)));
   const current = visible.find((m) => m.key === mod) ? mod : 'dashboard';
   const View = VIEWS[current];
@@ -87,7 +87,7 @@ export default function AppShell() {
         <div className="side-foot">
           <div className="side-user">
             <span className="avatar">{initials(me.user.name)}</span>
-            <div className="who"><b>{me.user.name}</b><span>{ROLES[role]?.label}</span></div>
+            <div className="who"><b>{me.user.name}</b><span>{me.user.role_label || ROLES[role]?.label || role}</span></div>
             {!me.user.support && <button className="side-ic" title="Changer mon mot de passe" onClick={() => setPwd(true)}><Ic n="key" s={16} /></button>}
             <button className="side-ic" title="Se déconnecter" onClick={logout}><Ic n="logout" s={16} /></button>
           </div>
