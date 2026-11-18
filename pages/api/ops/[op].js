@@ -1,6 +1,7 @@
 import { handler, fail, audit, nextNumber, requireModule, n, r2 } from '../../../lib/api';
 import { guardOp } from '../../../lib/guardian';
 import { tx, q, one } from '../../../lib/db';
+import { can } from '../../../lib/perms';
 import { stockIn, stockOut, reverseMovements, cashTx, itemStock, today } from '../../../lib/stock';
 
 async function payDoc(t, user, doc, b) {
@@ -41,6 +42,25 @@ async function validateSale(t, user, doc) {
   const status = doc.type === 'facture' ? (n(doc.total) <= 0 ? 'paye' : 'valide') : 'valide';
   await t.q('UPDATE sales_docs SET status=$1, cost=$2 WHERE id=$3', [status, r2(cost), doc.id]);
   return { ...doc, status, cost };
+}
+
+// Sortie de produits confiés à un vendeur (dépôt) : utilisé le matin et pour ce que le vendeur garde le soir
+async function consignOut(t, user, { customer, date, tier, notes, lines }) {
+  if (!customer) fail('Choisissez le vendeur ou le revendeur');
+  const cust = await t.one('SELECT id,name FROM customers WHERE id=$1 AND company_id=$2', [customer, user.cid]);
+  if (!cust) fail('Vendeur introuvable');
+  const agg = new Map();
+  for (const l of lines || []) { const q = n(l.qty), id = Number(l.item_id); if (id && q > 0) agg.set(id, { qty: (agg.get(id)?.qty || 0) + q, price: n(l.unit_price) }); }
+  if (!agg.size) fail('Ajoutez au moins un produit avec une quantité');
+  const number = await nextNumber(t, user.cid, 'depot', 'DEP');
+  const c = await t.one('INSERT INTO consignments (company_id,number,customer_id,date,tier,notes,user_id) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *',
+    [user.cid, number, customer, date || today(), tier === 'gros' ? 'gros' : 'detail', notes || null, user.uid]);
+  for (const [itemId, v] of agg) {
+    const line = await t.one('INSERT INTO consignment_lines (consignment_id,item_id,qty_out,unit_price) VALUES ($1,$2,$3,$4) RETURNING id', [c.id, itemId, v.qty, v.price]);
+    const out = await stockOut(t, user, { item_id: itemId, qty: v.qty, type: 'depot', ref_type: 'consignments', ref_id: c.id, note: `${number} — ${cust.name}` });
+    for (const k of out.consumed) await t.q('INSERT INTO consignment_lots (consignment_id,line_id,item_id,lot_id,qty,unit_cost) VALUES ($1,$2,$3,$4,$5,$6)', [c.id, line.id, itemId, k.lot_id, k.qty, k.unit_cost]);
+  }
+  return { id: c.id, number };
 }
 
 async function getDoc(t, user, id) {
@@ -761,29 +781,15 @@ const OPS = {
 
   // ---------- VENDEURS & DÉPÔTS ----------
   // Confier des produits à un vendeur / revendeur : ils sortent du magasin (lots les plus anciens d'abord)
-  consign_out: ['ventes', async (t, user, b) => {
+  consign_out: [['ventes', 'stock'], async (t, user, b) => {
     let customer = Number(b.customer_id) || null;
     if (!customer && b.new_customer?.name) {
       customer = (await t.one("INSERT INTO customers (company_id,name,phone,type) VALUES ($1,$2,$3,'vendeur') RETURNING id", [user.cid, String(b.new_customer.name).trim(), b.new_customer.phone || null])).id;
     }
-    if (!customer) fail('Choisissez le vendeur ou le revendeur');
-    const cust = await t.one('SELECT id,name FROM customers WHERE id=$1 AND company_id=$2', [customer, user.cid]);
-    if (!cust) fail('Vendeur introuvable');
-    const agg = new Map();
-    for (const l of b.lines || []) { const q = n(l.qty), id = Number(l.item_id); if (id && q > 0) agg.set(id, { qty: (agg.get(id)?.qty || 0) + q, price: n(l.unit_price) }); }
-    if (!agg.size) fail('Ajoutez au moins un produit avec une quantité');
-    const number = await nextNumber(t, user.cid, 'depot', 'DEP');
-    const c = await t.one('INSERT INTO consignments (company_id,number,customer_id,date,tier,notes,user_id) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *',
-      [user.cid, number, customer, b.date || today(), b.tier === 'gros' ? 'gros' : 'detail', b.notes || null, user.uid]);
-    for (const [itemId, v] of agg) {
-      const line = await t.one('INSERT INTO consignment_lines (consignment_id,item_id,qty_out,unit_price) VALUES ($1,$2,$3,$4) RETURNING id', [c.id, itemId, v.qty, v.price]);
-      const out = await stockOut(t, user, { item_id: itemId, qty: v.qty, type: 'depot', ref_type: 'consignments', ref_id: c.id, note: `${number} — ${cust.name}` });
-      for (const k of out.consumed) await t.q('INSERT INTO consignment_lots (consignment_id,line_id,item_id,lot_id,qty,unit_cost) VALUES ($1,$2,$3,$4,$5,$6)', [c.id, line.id, itemId, k.lot_id, k.qty, k.unit_cost]);
-    }
-    return { id: c.id, number };
+    return consignOut(t, user, { customer, date: b.date, tier: b.tier, notes: b.notes, lines: b.lines });
   }],
   // Retour du soir : ce qui revient retourne en stock, ce qui manque est facturé (vendu) ou déclaré perdu
-  consign_settle: ['ventes', async (t, user, b) => {
+  consign_settle: [['ventes', 'stock'], async (t, user, b) => {
     const c = await t.one('SELECT * FROM consignments WHERE id=$1 AND company_id=$2 FOR UPDATE', [b.id, user.cid]);
     if (!c) fail('Dépôt introuvable');
     if (c.status !== 'ouvert') fail('Ce dépôt est déjà réglé');
@@ -791,13 +797,15 @@ const OPS = {
     const input = new Map((b.lines || []).map((x) => [Number(x.id), x]));
     const date = b.date || today();
     let doc = null; let subtotal = 0;
-    const sold = [];
+    const sold = []; const keep = [];
     for (const l of lines) {
-      const ret = n(input.get(l.id)?.returned), lost = n(input.get(l.id)?.lost);
-      if (ret < 0 || lost < 0) fail('Quantités invalides');
-      if (ret + lost > n(l.qty_out) + 1e-9) fail(`${l.name} : on ne peut pas rendre ou perdre plus que ce qui a été confié (${n(l.qty_out)})`);
+      const back0 = n(input.get(l.id)?.returned), lost = n(input.get(l.id)?.lost), kept = n(input.get(l.id)?.kept);
+      if (back0 < 0 || lost < 0 || kept < 0) fail('Quantités invalides');
+      if (back0 + lost + kept > n(l.qty_out) + 1e-9) fail(`${l.name} : rapporté + perdu + gardé dépasse ce qui a été confié (${n(l.qty_out)})`);
+      const ret = back0 + kept; // ce que le vendeur garde repasse par le stock puis repart dans un nouveau dépôt
       const s = Math.round((n(l.qty_out) - ret - lost) * 1000) / 1000;
-      sold.push({ l, ret, lost, s });
+      sold.push({ l, ret, lost, s, kept, back0 });
+      if (kept > 0) keep.push({ item_id: l.item_id, qty: kept, unit_price: n(l.unit_price) });
       subtotal += s * n(l.unit_price);
     }
     if (subtotal > 0 || sold.some((x) => x.s > 0)) {
@@ -845,13 +853,17 @@ const OPS = {
     if (doc) {
       status = n(doc.total) <= 0 ? 'paye' : 'valide';
       await t.q('UPDATE sales_docs SET status=$1, cost=$2 WHERE id=$3', [status, r2(cost), doc.id]);
-      const paid = Math.min(r2(n(b.paid)), n(doc.total));
+      // Sans accès aux ventes ni à la caisse (magasinier) : l'argent sera encaissé plus tard par la caisse
+      const canMoney = can(user, 'ventes') || can(user, 'caisse');
+      const paid = canMoney ? Math.min(r2(n(b.paid)), n(doc.total)) : 0;
       if (paid > 0) await payDoc(t, user, { ...doc, status, paid: 0 }, { amount: paid, account_id: b.account_id, date });
     }
     await t.q("UPDATE consignments SET status='regle', sale_id=$1, settled_at=now() WHERE id=$2", [doc?.id || null, c.id]);
-    return { id: c.id, sale_id: doc?.id || null, sale_number: doc?.number || null, total: r2(subtotal) };
+    let next = null;
+    if (keep.length) next = await consignOut(t, user, { customer: c.customer_id, date: b.next_date || date, tier: c.tier, notes: `Reste gardé du dépôt ${c.number}`, lines: keep });
+    return { id: c.id, sale_id: doc?.id || null, sale_number: doc?.number || null, total: r2(subtotal), next_number: next?.number || null };
   }],
-  consign_cancel: ['ventes', async (t, user, b) => {
+  consign_cancel: [['ventes', 'stock'], async (t, user, b) => {
     const c = await t.one('SELECT * FROM consignments WHERE id=$1 AND company_id=$2 FOR UPDATE', [b.id, user.cid]);
     if (!c) fail('Dépôt introuvable');
     if (c.status !== 'ouvert') fail('Seul un dépôt non réglé peut être annulé');

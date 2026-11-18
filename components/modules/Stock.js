@@ -1,3 +1,4 @@
+import Depots from './Depots';
 import { useState } from 'react';
 import { api, op, money, num, opts, today, daysUntil, date as fdate, LABELS } from '../../lib/client';
 import { Tabs, Badge, invalidateRefs, Modal, useRefOptions, RefSelect, toast, useData, confirmDo } from '../ui';
@@ -11,12 +12,13 @@ const BOUGHT = ['mp', 'emballage', 'consommable', 'materiel']; // achetés : pri
 const PERISH = ['mp', 'pf', 'semi_fini'];             // périssables : durée de conservation
 export const UNITS = ['unité', 'kg', 'g', 'L', 'mL', 'bouteille', 'pot', 'sachet', 'bidon', 'carton', 'pack', 'm', 'pièce'].map((u) => [u, u]);
 
-export default function Stock() {
+export default function Stock({ can }) {
   const [tab, setTab] = useState('items');
   return (
     <div>
-      <Tabs value={tab} onChange={setTab} tabs={[['items', 'Articles & niveaux'], ['achats', '🛒 Achats'], ['lots', 'Lots'], ['moves', 'Mouvements'], ['cats', 'Catégories'], ['wh', 'Entrepôts']]} />
+      <Tabs value={tab} onChange={setTab} tabs={[['items', 'Articles & niveaux'], ['vendeurs', '🚚 Sorties vendeurs'], ['achats', '🛒 Achats'], ['lots', 'Lots'], ['moves', 'Mouvements'], ['cats', 'Catégories'], ['wh', 'Entrepôts']]} />
       {tab === 'items' && <Items />}
+      {tab === 'vendeurs' && <Depots canMoney={!can || can('ventes') || can('caisse')} />}
       {tab === 'achats' && <PurchaseHistory />}
       {tab === 'lots' && <Lots />}
       {tab === 'moves' && <Moves />}

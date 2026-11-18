@@ -10,6 +10,7 @@ export const REQ_STATUS = { nouvelle: ['Envoyée', 'amber'], en_cours: ['En cour
 
 const GUIDE = [
   ['Savoir quoi acheter', 'Achats → 📝 À acheter : la liste se calcule d\'après ce que vous utilisez chaque jour. Envoyez-la sur WhatsApp, puis « J\'ai acheté » pour l\'enregistrer. En bas : 🧮 Préparer une production pour savoir ce qui manque avant de produire.'],
+  ['Produits donnés aux vendeurs', "Stock → 🚚 Sorties vendeurs (ou Ventes → Vendeurs & dépôts). Le matin : + Confier des produits. Le soir : Retour du soir, notez ce qui revient, ce que le vendeur garde pour demain ; le reste est vendu."],
   ['Changer les accès d\'un rôle', "Administration → Rôles & accès : cochez ou décochez les menus du rôle (vendeur, magasinier…), puis Enregistrer. « + Nouveau rôle » pour en créer un."],
   ['Voir les ventes', "Ventes → 📜 Historique des ventes : choisissez la période, cherchez un client ou un produit. Touchez une vente pour voir le détail."],
   ['Corriger une erreur de vente', "Ventes → 📜 Historique des ventes (ou Factures) → ✏️ Corriger sur la vente (ou juste après la vente à la caisse). Changez le produit, la quantité, le prix, le client, la date ou l'argent reçu, puis Enregistrer la correction. Stock et caisse se mettent à jour."],

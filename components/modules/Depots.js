@@ -5,7 +5,7 @@ import { waLink } from '../Chrome';
 import { Ic } from './Dashboard';
 
 // Produits confiés aux vendeuses / revendeurs : sortie le matin, retour et argent le soir.
-export default function Depots() {
+export default function Depots({ canMoney = true }) {
   const { data, reload } = useData(() => api('app/depots'), []);
   const [modal, setModal] = useState(null);
   if (!data) return <div className="spinner">Chargement…</div>;
@@ -16,7 +16,7 @@ export default function Depots() {
   return (
     <div>
       <div className="toolbar">
-        <span className="muted small">Le matin : <b>Confier des produits</b>. Le soir : <b>Retour & argent</b> — le logiciel calcule ce qui a été vendu et ce que le vendeur doit.</span>
+        <span className="muted small">Le matin : <b>Confier des produits</b> (ils sortent du stock). Le soir : <b>Retour du soir</b> — dites ce qui revient ; le logiciel calcule ce qui a été vendu{canMoney ? ' et ce que le vendeur doit' : ''}.</span>
         <div className="grow" />
         <button className="btn primary" onClick={() => setModal({ k: 'out' })}>+ Confier des produits</button>
       </div>
@@ -40,7 +40,7 @@ export default function Depots() {
             <span><span className="muted small">Valeur confiée </span><b>{money(o.value)}</b></span>
             <span className="row">
               <button className="btn sm danger" onClick={() => confirmDo(`Annuler le dépôt ${o.number} ? Tous les produits reviennent en stock.`) && op('consign_cancel', { id: o.id }).then(() => { toast('Dépôt annulé, produits remis en stock'); refresh(); }).catch((e) => toast(e.message, 'error'))}>Annuler</button>
-              <button className="btn sm primary" onClick={() => setModal({ k: 'settle', o })}>Retour & argent</button>
+              <button className="btn sm primary" onClick={() => setModal({ k: 'settle', o })}>{canMoney ? 'Retour & argent' : 'Retour du soir'}</button>
             </span>
           </div>
         </div>
@@ -56,7 +56,7 @@ export default function Depots() {
               {x.phone && <a className="btn sm" href={waLink(x.phone, `Bonjour ${x.name}, petit rappel : il reste ${money(x.due)} à régler pour les produits confiés. Merci !`)} target="_blank" rel="noreferrer"><Ic n="whatsapp" s={14} /> Rappel</a>}
             </div>
           ))}
-          <p className="muted small" style={{ margin: '8px 0 0' }}>Pour enregistrer un paiement : Ventes & Clients → Factures → la facture du vendeur → Encaisser.</p>
+          <p className="muted small" style={{ margin: '8px 0 0' }}>Pour enregistrer un paiement : Ventes & Clients → Historique des ventes → la vente du vendeur → Encaisser.</p>
         </div>
       )}
 
@@ -74,7 +74,7 @@ export default function Depots() {
       </div>
 
       {modal?.k === 'out' && <ConsignOut onClose={(ok) => { setModal(null); if (ok) refresh(); }} />}
-      {modal?.k === 'settle' && <Settle o={modal.o} onClose={(ok) => { setModal(null); if (ok) refresh(); }} />}
+      {modal?.k === 'settle' && <Settle o={modal.o} canMoney={canMoney} onClose={(ok) => { setModal(null); if (ok) refresh(); }} />}
     </div>
   );
 }
@@ -143,51 +143,66 @@ function ConsignOut({ onClose }) {
   );
 }
 
-function Settle({ o, onClose }) {
+function Settle({ o, onClose, canMoney = true }) {
   const accounts = useRefOptions('accounts', { active: true });
-  const [v, setV] = useState(Object.fromEntries(o.lines.map((l) => [l.id, { returned: '', lost: '' }])));
+  const [v, setV] = useState(Object.fromEntries(o.lines.map((l) => [l.id, { returned: '', lost: '', kept: '' }])));
   const [d, setD] = useState({ date: today() });
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
   const calc = o.lines.map((l) => {
-    const r = Number(v[l.id].returned) || 0, p = Number(v[l.id].lost) || 0;
-    const sold = Math.round((Number(l.qty_out) - r - p) * 1000) / 1000;
-    return { l, r, p, sold, amount: sold * Number(l.unit_price), bad: sold < 0 };
+    const r = Number(v[l.id].returned) || 0, p = Number(v[l.id].lost) || 0, k = Number(v[l.id].kept) || 0;
+    const sold = Math.round((Number(l.qty_out) - r - p - k) * 1000) / 1000;
+    return { l, r, p, k, sold, amount: sold * Number(l.unit_price), bad: sold < 0 };
   });
   const due = calc.reduce((s, c) => s + Math.max(c.amount, 0), 0);
-  const paid = d.paid === undefined || d.paid === '' ? due : Number(d.paid);
+  const paid = !canMoney ? 0 : d.paid === undefined || d.paid === '' ? due : Number(d.paid);
   const acc = d.account_id || accounts[0]?.id || '';
+  const kept = calc.filter((c) => c.k > 0);
+  const setAll = (field) => setV(Object.fromEntries(o.lines.map((l) => [l.id, { returned: field === 'returned' ? String(Number(l.qty_out)) : '', lost: '', kept: field === 'kept' ? String(Number(l.qty_out)) : '' }])));
+  const setOne = (id, field, val) => setV({ ...v, [id]: { ...v[id], [field]: val } });
   const go = async () => {
     setErr(null); setBusy(true);
     try {
-      const r = await op('consign_settle', { id: o.id, date: d.date, account_id: acc, paid, lines: calc.map((c) => ({ id: c.l.id, returned: c.r, lost: c.p })) });
-      toast(r.sale_number ? `Dépôt réglé — facture ${r.sale_number}` : 'Dépôt réglé — tout est revenu en stock');
+      const r = await op('consign_settle', { id: o.id, date: d.date, account_id: acc, paid, lines: calc.map((c) => ({ id: c.l.id, returned: c.r, lost: c.p, kept: c.k })) });
+      toast((r.sale_number ? `Retour enregistré — ventes ${r.sale_number}` : 'Retour enregistré — rien de vendu') + (r.next_number ? ` · reste gardé : dépôt ${r.next_number}` : ''));
       onClose(true);
     } catch (e) { setErr(e.message); setBusy(false); }
   };
   return (
-    <Modal wide title={`Retour & argent — ${o.seller}`} onClose={() => onClose(false)}
+    <Modal wide title={`Retour du soir — ${o.seller}`} onClose={() => onClose(false)}
       footer={<><button className="btn" onClick={() => onClose(false)}>Annuler</button><button className="btn primary" disabled={busy || calc.some((c) => c.bad)} onClick={go}>{busy ? 'Enregistrement…' : 'Valider le retour'}</button></>}>
       {err && <div className="err">{err}</div>}
-      <div className="note" style={{ marginBottom: 12 }}>Comptez ce que le vendeur <b>rapporte</b>. Le reste est considéré comme <b>vendu</b> (ou perdu / abîmé si vous le notez). Les produits rapportés reviennent dans le stock.</div>
-      <div className="table-wrap"><table className="lines">
-        <thead><tr><th>Produit</th><th className="r">Confié</th><th style={{ width: 120 }}>Rapporté</th><th style={{ width: 120 }}>Perdu / abîmé</th><th className="r">Vendu</th><th className="r">À payer</th></tr></thead>
+      <div className="note" style={{ marginBottom: 10 }}>Pour chaque produit, notez ce que le vendeur <b>rapporte</b> (revient dans le stock), ce qu'il <b>garde pour demain</b> et ce qui est <b>perdu / abîmé</b>. Tout le reste compte comme <b>vendu</b>.</div>
+      <div className="row" style={{ gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
+        <span className="muted small">Raccourcis :</span>
+        <button className="btn sm" onClick={() => setAll('sold')}>✅ Il a tout vendu</button>
+        <button className="btn sm" onClick={() => setAll('returned')}>↩️ Il a tout rapporté</button>
+        <button className="btn sm" onClick={() => setAll('kept')}>🕗 Il garde tout pour demain</button>
+      </div>
+      <div className="table-wrap"><table className="lines settle-t">
+        <thead><tr><th>Produit</th><th className="r">Confié</th><th style={{ width: 110 }}>Rapporté</th><th style={{ width: 110 }}>Gardé pour demain</th><th style={{ width: 110 }}>Perdu / abîmé</th><th className="r">Vendu</th>{canMoney && <th className="r">À payer</th>}</tr></thead>
         <tbody>{calc.map((c) => (
           <tr key={c.l.id}><td className="strong">{c.l.name}</td><td className="r">{num(c.l.qty_out)}</td>
-            <td><input type="number" step="any" min="0" className="input" placeholder="0" value={v[c.l.id].returned} onChange={(e) => setV({ ...v, [c.l.id]: { ...v[c.l.id], returned: e.target.value } })} /></td>
-            <td><input type="number" step="any" min="0" className="input" placeholder="0" value={v[c.l.id].lost} onChange={(e) => setV({ ...v, [c.l.id]: { ...v[c.l.id], lost: e.target.value } })} /></td>
-            <td className={'r strong ' + (c.bad ? 'neg' : '')}>{c.bad ? 'trop rendu' : num(c.sold)}</td>
-            <td className="r mono">{money(Math.max(c.amount, 0))}</td></tr>
+            {['returned', 'kept', 'lost'].map((f) => <td key={f}><input type="number" step="any" min="0" className="input" placeholder="0" value={v[c.l.id][f]} onChange={(e) => setOne(c.l.id, f, e.target.value)} /></td>)}
+            <td className={'r strong ' + (c.bad ? 'neg' : 'pos')}>{c.bad ? 'trop' : num(c.sold)}</td>
+            {canMoney && <td className="r mono">{money(Math.max(c.amount, 0))}</td>}</tr>
         ))}</tbody>
-        <tfoot><tr><td colSpan={5} className="strong">Total des ventes du vendeur</td><td className="r mono strong">{money(due)}</td></tr></tfoot>
+        {canMoney && <tfoot><tr><td colSpan={6} className="strong">Total des ventes du vendeur</td><td className="r mono strong">{money(due)}</td></tr></tfoot>}
       </table></div>
-      <div className="form" style={{ marginTop: 14 }}>
-        <div className="field"><label>Argent remis par le vendeur</label><input type="number" className="input" value={d.paid ?? ''} placeholder={String(Math.round(due))} onChange={(e) => setD({ ...d, paid: e.target.value })} /></div>
-        <div className="field"><label>Mis dans</label><select className="input" value={acc} onChange={(e) => setD({ ...d, account_id: e.target.value })}>{accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}</select></div>
-        <div className="field"><label>Date</label><input type="date" className="input" value={d.date} onChange={(e) => setD({ ...d, date: e.target.value })} /></div>
+      <div className="settle-sum">
+        <span>Vendu : <b>{num(calc.reduce((s, c) => s + Math.max(c.sold, 0), 0))}</b> · {money(due)}</span>
+        <span>Revient en stock : <b>{num(calc.reduce((s, c) => s + c.r, 0))}</b></span>
+        {kept.length > 0 && <span>Gardé pour demain : <b>{num(kept.reduce((s, c) => s + c.k, 0))}</b> (nouveau dépôt créé)</span>}
+        {calc.some((c) => c.p > 0) && <span className="neg">Perdu : <b>{num(calc.reduce((s, c) => s + c.p, 0))}</b></span>}
       </div>
-      {paid < due - 0.5 && <div className="note" style={{ marginTop: 10 }}>Le vendeur doit encore <b>{money(due - paid)}</b>. Ce montant est suivi dans « Ce que les vendeurs doivent encore ».</div>}
-      {paid > due + 0.5 && <div className="err" style={{ marginTop: 10 }}>Le montant remis dépasse le total des ventes.</div>}
+      <div className="form" style={{ marginTop: 14 }}>
+        {canMoney && <div className="field"><label>Argent remis par le vendeur</label><input type="number" className="input" value={d.paid ?? ''} placeholder={String(Math.round(due))} onChange={(e) => setD({ ...d, paid: e.target.value })} /></div>}
+        {canMoney && <div className="field"><label>Mis dans</label><select className="input" value={acc} onChange={(e) => setD({ ...d, account_id: e.target.value })}>{accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}</select></div>}
+        <div className="field"><label>Date</label><input type="date" className="input" value={d.date} max={today()} onChange={(e) => setD({ ...d, date: e.target.value })} /></div>
+      </div>
+      {!canMoney && due > 0 && <div className="note" style={{ marginTop: 10 }}>Le vendeur doit <b>{money(due)}</b> pour ce qu'il a vendu. L'argent sera encaissé par la caisse (Ventes → Historique des ventes).</div>}
+      {canMoney && paid < due - 0.5 && <div className="note" style={{ marginTop: 10 }}>Le vendeur doit encore <b>{money(due - paid)}</b>. Ce montant est suivi dans « Ce que les vendeurs doivent encore ».</div>}
+      {canMoney && paid > due + 0.5 && <div className="err" style={{ marginTop: 10 }}>Le montant remis dépasse le total des ventes.</div>}
     </Modal>
   );
 }

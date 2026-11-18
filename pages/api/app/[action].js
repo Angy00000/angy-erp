@@ -186,7 +186,7 @@ export default handler(async (req, res, user) => {
   }
 
   if (action === 'depots') {
-    if (!c('ventes')) fail('Accès refusé', 403);
+    if (!c('ventes') && !c('stock')) fail('Accès refusé', 403);
     const open = await q(`SELECT k.id,k.number,k.date,k.tier,k.notes,k.customer_id,cu.name AS seller,cu.phone,(current_date-k.date) AS days
       FROM consignments k LEFT JOIN customers cu ON cu.id=k.customer_id WHERE k.company_id=$1 AND k.status='ouvert' ORDER BY k.date, k.id`, [cid]);
     const done = await q(`SELECT k.id,k.number,k.date,k.settled_at,cu.name AS seller,cu.phone,d.id AS sale_id,d.number AS sale_number,COALESCE(d.total,0) AS total,COALESCE(d.paid,0) AS paid,
