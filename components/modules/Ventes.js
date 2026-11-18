@@ -401,6 +401,11 @@ function SalesHistory() {
     invalidateRefs('items'); invalidateRefs('accounts'); reload();
   };
 
+  const restoreSale = async (d) => {
+    if (!confirmDo(`Rétablir la vente ${d.number} (${money(d.total)}) ? Les produits ressortent du stock et l'argent rendu revient en caisse.`)) return;
+    await run(() => op('sale_restore', { id: d.id }), 'Vente rétablie');
+    invalidateRefs('items'); invalidateRefs('accounts'); reload();
+  };
   return (
     <div>
       <div className="toolbar" style={{ flexWrap: 'wrap', gap: 8 }}>
@@ -461,6 +466,10 @@ function SalesHistory() {
                         </div>
                         {d.notes && <div className="muted small" style={{ marginTop: 6 }}>Note : {d.notes}</div>}
                       </div>
+                    )}
+                    {d.status === 'annule' && (
+                      <div className="hist-actions"><button className="btn sm" onClick={() => restoreSale(d)}>↩️ Rétablir la vente</button>
+                        <button className="btn sm ghost" onClick={() => setOpen({ ...open, [d.id]: !isOpen })}>{isOpen ? 'Masquer' : 'Détails'}</button></div>
                     )}
                     {d.status !== 'annule' && (
                       <div className="hist-actions">

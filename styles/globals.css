@@ -942,7 +942,7 @@ tr.best-row td { background: var(--green-soft, rgba(30,140,80,.08)); }
 .hist-day-head{display:flex;align-items:baseline;gap:10px;padding:4px 4px 8px;font-size:15px}
 .hist-sale{border-bottom:1px solid var(--line-2);padding:10px 14px}
 .hist-sale:last-child{border-bottom:0}
-.hist-sale.cancelled{opacity:.55}
+.hist-sale.cancelled .hist-main{opacity:.55}
 .hist-sale.cancelled .hist-amount b{text-decoration:line-through}
 .hist-main{display:flex;gap:14px;align-items:flex-start;cursor:pointer}
 .hist-when{display:flex;flex-direction:column;min-width:92px}

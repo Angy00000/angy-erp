@@ -524,6 +524,38 @@ const OPS = {
     await t.q("UPDATE sales_docs SET paid=0, status=CASE WHEN status IN ('paye','partiel') THEN 'valide' ELSE status END WHERE id=$1", [doc.id]);
     return { ok: true };
   }],
+  // Rétablir une vente annulée par erreur : les produits ressortent du stock et l'argent rendu revient en caisse
+  sale_restore: [['ventes', 'caisse'], async (t, user, b) => {
+    const doc = await getDoc(t, user, b.id);
+    if (doc.type !== 'facture' || doc.status !== 'annule') fail('Seule une vente annulée peut être rétablie');
+    const lastR = await t.one(`SELECT GREATEST(
+        (SELECT MAX(created_at) FROM stock_movements WHERE company_id=$1 AND ref_type='sales_docs_annule' AND ref_id=$2 AND type='retablissement'),
+        (SELECT MAX(created_at) FROM cash_transactions WHERE company_id=$1 AND ref_type='sales_docs' AND ref_id=$2 AND category='Vente rétablie')) AS at`, [user.cid, doc.id]);
+    const since = lastR?.at || '1970-01-01';
+    const back = await t.q(`SELECT * FROM stock_movements WHERE company_id=$1 AND ref_type='sales_docs_annule' AND ref_id=$2 AND type='annulation' AND created_at > $3`, [user.cid, doc.id, since]);
+    for (const m of back) {
+      if (!m.lot_id) continue;
+      const lot = await t.one('SELECT l.qty, i.name FROM lots l JOIN items i ON i.id=l.item_id WHERE l.id=$1 FOR UPDATE', [m.lot_id]);
+      if (!lot || n(lot.qty) + 1e-9 < n(m.qty)) fail(`Plus assez de « ${lot?.name || 'produit'} » en stock pour rétablir cette vente`);
+      await t.q('UPDATE lots SET qty=qty-$1 WHERE id=$2', [n(m.qty), m.lot_id]);
+      await t.q(`INSERT INTO stock_movements (company_id,item_id,lot_id,warehouse_id,type,qty,unit_cost,ref_type,ref_id,note,user_id)
+        VALUES ($1,$2,$3,$4,'retablissement',$5,$6,'sales_docs_annule',$7,$8,$9)`, [user.cid, m.item_id, m.lot_id, m.warehouse_id, -n(m.qty), n(m.unit_cost), doc.id, `Rétablissement ${doc.number}`, user.uid]);
+    }
+    const refunds = await t.q(`SELECT * FROM cash_transactions WHERE company_id=$1 AND ref_type='sales_docs' AND ref_id=$2 AND category='Remboursement client' AND created_at > $3`, [user.cid, doc.id, since]);
+    let paid = 0;
+    for (const r of refunds) {
+      const amt = -n(r.amount);
+      if (amt <= 0) continue;
+      await cashTx(t, user, { account_id: r.account_id, amount: amt, category: 'Vente rétablie', label: `${doc.number} rétablie (annulée par erreur)`, ref_type: 'sales_docs', ref_id: doc.id, date: today() });
+      await t.q(`INSERT INTO payments (company_id,direction,party_type,party_id,doc_type,doc_id,account_id,amount,date,reference,user_id)
+        VALUES ($1,'in','customer',$2,'sales_docs',$3,$4,$5,$6,'Vente rétablie',$7)`, [user.cid, doc.customer_id, doc.id, r.account_id, amt, doc.date, user.uid]);
+      paid += amt;
+    }
+    paid = Math.min(r2(paid), n(doc.total));
+    const status = paid >= n(doc.total) - 0.01 ? 'paye' : paid > 0 ? 'partiel' : 'valide';
+    await t.q('UPDATE sales_docs SET status=$1, paid=$2 WHERE id=$3', [status, paid, doc.id]);
+    return { ok: true, number: doc.number, total: n(doc.total), paid };
+  }],
   sale_convert: ['ventes', async (t, user, b) => {
     const doc = await getDoc(t, user, b.id);
     const to = b.to;
